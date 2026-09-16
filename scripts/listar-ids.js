@@ -5,10 +5,7 @@
 //
 // Só faz leitura na API do Discord. Nada é alterado no servidor.
 
-import { readFileSync } from 'node:fs';
-
-const API = 'https://discord.com/api/v10';
-const USER_AGENT = 'DiscordBot (https://github.com/tech-girls/bot-tech-girls, 0.1.0)';
+import { carregarAmbiente, chamarApi, exigir } from './comum.js';
 
 // Nomes esperados, na ordem da seção 9.2 do CLAUDE.md.
 const TAGS_ESPERADAS = {
@@ -32,39 +29,6 @@ function normalizar(nome) {
     .replace(/[^\p{Letter}\p{Number}]+/gu, ' ')
     .trim()
     .toLowerCase();
-}
-
-// Lê pares CHAVE=VALOR de um arquivo, ignorando comentários e linhas vazias.
-function lerPares(caminho) {
-  let conteudo;
-  try {
-    conteudo = readFileSync(new URL(caminho, import.meta.url), 'utf8');
-  } catch {
-    return {};
-  }
-  const pares = {};
-  for (const linha of conteudo.split(/\r?\n/)) {
-    if (!linha.trim() || linha.trim().startsWith('#')) continue;
-    const achado = linha.match(/^\s*([A-Z_]+)\s*=\s*(.*)$/);
-    if (achado) pares[achado[1]] = achado[2].trim().replace(/^["']|["']$/g, '');
-  }
-  return pares;
-}
-
-function carregarAmbiente() {
-  return { ...lerPares('../wrangler.toml'), ...lerPares('../.dev.vars'), ...process.env };
-}
-
-async function buscar(caminho, token) {
-  const resposta = await fetch(API + caminho, {
-    headers: { authorization: `Bot ${token}`, 'user-agent': USER_AGENT },
-  });
-
-  if (!resposta.ok) {
-    const corpo = await resposta.text();
-    throw new Error(`GET ${caminho} devolveu ${resposta.status}. Resposta: ${corpo.slice(0, 300)}`);
-  }
-  return resposta.json();
 }
 
 // Indexa por nome normalizado e guarda os nomes repetidos, que deixariam a escolha ambígua.
@@ -106,21 +70,11 @@ function conferirGrupo(rotulo, esperados, indice, usados) {
 
 async function principal() {
   const ambiente = carregarAmbiente();
+  exigir(ambiente, ['DISCORD_TOKEN', 'GUILD_ID', 'CANAL_VAGAS_ID', 'CANAL_ANUNCIOS_ID', 'CANAL_LOG_ID']);
   const token = ambiente.DISCORD_TOKEN;
 
-  if (!token) {
-    console.error('Falta DISCORD_TOKEN. Copie o .dev.vars.example para .dev.vars e preencha o token.');
-    process.exit(1);
-  }
-  for (const nome of ['GUILD_ID', 'CANAL_VAGAS_ID', 'CANAL_ANUNCIOS_ID', 'CANAL_LOG_ID']) {
-    if (!ambiente[nome]) {
-      console.error(`Falta ${nome} no wrangler.toml.`);
-      process.exit(1);
-    }
-  }
-
   // 1. Canais: confere se os IDs configurados apontam mesmo para os canais certos.
-  const canais = await buscar(`/guilds/${ambiente.GUILD_ID}/channels`, token);
+  const canais = await chamarApi('GET', `/guilds/${ambiente.GUILD_ID}/channels`, { token });
   const porId = new Map(canais.map((canal) => [canal.id, canal]));
 
   console.log('\nCANAIS CONFIGURADOS');
@@ -137,7 +91,7 @@ async function principal() {
   }
 
   // 2. Tags do fórum de vagas.
-  const canalVagas = await buscar(`/channels/${ambiente.CANAL_VAGAS_ID}`, token);
+  const canalVagas = await chamarApi('GET', `/channels/${ambiente.CANAL_VAGAS_ID}`, { token });
   const tags = canalVagas.available_tags ?? [];
   const { indice: indiceTags, repetidos: tagsRepetidas } = indexar(tags);
   const tagsUsadas = new Set();
@@ -157,7 +111,7 @@ async function principal() {
 
   // 3. Cargos. Aqui não listamos o que sobra: o servidor tem dezenas de cargos legítimos
   // fora da seção 9.3. Interessa o que falta, o que é ambíguo e o que não é mencionável.
-  const guilda = await buscar(`/guilds/${ambiente.GUILD_ID}`, token);
+  const guilda = await chamarApi('GET', `/guilds/${ambiente.GUILD_ID}`, { token });
   const cargos = guilda.roles ?? [];
   const { indice: indiceCargos, repetidos: cargosRepetidos } = indexar(cargos);
   conferirGrupo('CARGOS DE MOMENTO DE CARREIRA', CARGOS_ESPERADOS, indiceCargos, new Set());
