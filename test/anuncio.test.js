@@ -46,12 +46,20 @@ function espionarApi({ falharEm } = {}) {
   };
 }
 
+// Admin padrão dos testes: tem apelido no servidor e nenhum avatar.
+const MEMBRO = {
+  nick: 'Sam',
+  avatar: null,
+  user: { id: 'ADMIN1', username: 'samara', global_name: 'Samara Alanna', avatar: null },
+};
+
 // Monta o payload de um envio de modal, no formato aninhado em Label que a doc mostra.
-const envioDeModal = (campos) => ({
+const envioDeModal = (campos, membro = MEMBRO) => ({
   type: 5,
   application_id: 'APP',
   token: 'token-da-interacao',
-  member: { user: { id: 'ADMIN1' } },
+  guild_id: 'G1',
+  member: membro,
   data: {
     custom_id: 'anuncio:modal',
     components: Object.entries(campos).map(([id, valor]) => ({
@@ -62,11 +70,12 @@ const envioDeModal = (campos) => ({
   },
 });
 
-const componente = (custom_id, { embed, values } = {}) => ({
+const componente = (custom_id, { embed, values, membro = MEMBRO } = {}) => ({
   type: 3,
   application_id: 'APP',
   token: 'token-da-interacao',
-  member: { user: { id: 'ADMIN1' } },
+  guild_id: 'G1',
+  member: membro,
   message: { embeds: embed ? [embed] : [] },
   data: { custom_id, ...(values ? { values } : {}) },
 });
@@ -78,17 +87,28 @@ const ANUNCIO_BASE = {
   texto: 'Inscrições abertas.',
   link: 'https://techgirls.dev/mentoria',
   quando: '15/10/2026 19:00',
-  aviso: '',
 };
 
 // Atalho: envia o modal, escolhe uma menção e devolve o card pronto para publicar.
-async function cardPronto(escolha, campos = ANUNCIO_BASE) {
-  const previa = (await responder(envioDeModal(campos))).data.embeds[0];
-  const atualizada = await responder(componente('anuncio:mencao', { embed: previa, values: [escolha] }));
+async function cardPronto(escolha, campos = ANUNCIO_BASE, membro = MEMBRO) {
+  const previa = (await responder(envioDeModal(campos, membro))).data.embeds[0];
+  const atualizada = await responder(componente('anuncio:mencao', { embed: previa, values: [escolha], membro }));
   return atualizada.data.embeds[0];
 }
 
 describe('envio do modal', () => {
+  test('tem quatro campos, sem aviso de conteúdo', async () => {
+    const { comandoAnuncio } = await import('../src/comandos/anuncio.js');
+    const modal = JSON.parse(await comandoAnuncio().text()).data;
+
+    assert.equal(modal.components.length, 4);
+    assert.deepEqual(
+      modal.components.map((label) => label.component.custom_id),
+      ['titulo', 'texto', 'link', 'quando'],
+    );
+    assert.equal(modal.components.every((label) => label.type === 18), true, 'todo campo vem em Label');
+  });
+
   test('gera pré-visualização efêmera com Publicar desabilitado', async () => {
     const resposta = await responder(envioDeModal(ANUNCIO_BASE));
 
@@ -140,6 +160,63 @@ describe('envio do modal', () => {
   });
 });
 
+describe('autoria do card', () => {
+  test('usa o apelido do servidor', async () => {
+    const embed = (await responder(envioDeModal(ANUNCIO_BASE))).data.embeds[0];
+    assert.equal(embed.author.name, 'Autora: Sam');
+  });
+
+  test('sem apelido, cai no nome de exibição', async () => {
+    const membro = { ...MEMBRO, nick: null };
+    const embed = (await responder(envioDeModal(ANUNCIO_BASE, membro))).data.embeds[0];
+    assert.equal(embed.author.name, 'Autora: Samara Alanna');
+  });
+
+  test('sem apelido e sem nome de exibição, cai no nome de usuária', async () => {
+    const membro = { ...MEMBRO, nick: null, user: { ...MEMBRO.user, global_name: null } };
+    const embed = (await responder(envioDeModal(ANUNCIO_BASE, membro))).data.embeds[0];
+    assert.equal(embed.author.name, 'Autora: samara');
+  });
+
+  test('avatar do servidor ganha do avatar da conta, e animado vira gif', async () => {
+    const membro = { ...MEMBRO, avatar: 'a_1269e74a', user: { ...MEMBRO.user, avatar: 'deconta' } };
+    const embed = (await responder(envioDeModal(ANUNCIO_BASE, membro))).data.embeds[0];
+    assert.equal(
+      embed.author.icon_url,
+      'https://cdn.discordapp.com/guilds/G1/users/ADMIN1/avatars/a_1269e74a.gif?size=128',
+    );
+  });
+
+  test('sem avatar de servidor, usa o avatar da conta', async () => {
+    const membro = { ...MEMBRO, user: { ...MEMBRO.user, avatar: 'deconta' } };
+    const embed = (await responder(envioDeModal(ANUNCIO_BASE, membro))).data.embeds[0];
+    assert.equal(embed.author.icon_url, 'https://cdn.discordapp.com/avatars/ADMIN1/deconta.png?size=128');
+  });
+
+  test('sem avatar nenhum, o card fica sem ícone', async () => {
+    const embed = (await responder(envioDeModal(ANUNCIO_BASE))).data.embeds[0];
+    assert.equal('icon_url' in embed.author, false);
+  });
+
+  test('a autora do anúncio é quem clicou em Publicar, não quem abriu o modal', async () => {
+    const api = espionarApi();
+    const outra = {
+      nick: 'Bia',
+      avatar: null,
+      user: { id: 'ADMIN2', username: 'bia', global_name: 'Beatriz', avatar: 'outroavatar' },
+    };
+
+    // O card foi montado pela Sam, mas quem clica em Publicar é a Bia.
+    const card = await cardPronto('ninguem');
+    await responder(componente('anuncio:publicar', { embed: card, membro: outra }));
+    await esperarPendentes();
+
+    const autor = api.publicacao().corpo.embeds[0].author;
+    assert.equal(autor.name, 'Autora: Bia');
+    assert.equal(autor.icon_url, 'https://cdn.discordapp.com/avatars/ADMIN2/outroavatar.png?size=128');
+  });
+});
+
 describe('horário de Brasília', () => {
   test('19:00 em Brasília vira 22:00 UTC', () => {
     assert.equal(lerDataBrasilia('15/10/2026 19:00').unix, Date.UTC(2026, 9, 15, 22, 0) / 1000);
@@ -159,6 +236,11 @@ describe('escolha da menção', () => {
     assert.equal(campo(resposta.data.embeds[0], 'Mencionar'), `<@&${ID_SUPORTE}>`);
     assert.equal(resposta.data.components[1].components[0].disabled, false);
     assert.equal(resposta.data.components[0].components[0].options.find((o) => o.value === 'suporte').default, true);
+  });
+
+  test('a autoria sobrevive à atualização do card', async () => {
+    const card = await cardPronto('suporte');
+    assert.equal(card.author.name, 'Autora: Sam');
   });
 
   test('@everyone e @here avisam que notificam o servidor', async () => {
@@ -250,17 +332,6 @@ describe('publicar', () => {
     await esperarPendentes();
 
     assert.equal(campo(api.publicacao().corpo.embeds[0], 'Link'), 'https://techgirls.dev');
-  });
-
-  test('aviso de conteúdo sai discreto, antes do texto e sem emoji de alerta', async () => {
-    const api = espionarApi();
-    const campos = { ...ANUNCIO_BASE, texto: 'Corpo do texto.', aviso: 'demissão' };
-    await responder(componente('anuncio:publicar', { embed: await cardPronto('ninguem', campos) }));
-    await esperarPendentes();
-
-    const descricao = api.publicacao().corpo.embeds[0].description;
-    assert.equal(descricao, '-# Este anúncio fala sobre: demissão\n\nCorpo do texto.');
-    assert.doesNotMatch(descricao, /⚠/);
   });
 
   test('registra no log e confirma com o link do anúncio', async () => {

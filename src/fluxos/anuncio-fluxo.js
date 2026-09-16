@@ -13,6 +13,7 @@ import {
   textoDaPrevia,
 } from '../componentes/anuncio-componentes.js';
 import { criarMensagem, editarRespostaOriginal, linkDaMensagem } from '../discord-api.js';
+import { lerAutora } from '../autora.js';
 import { lerDataBrasilia } from '../datas.js';
 import { registrarNoLog } from '../log.js';
 import { EFEMERA, TIPO_RESPOSTA, adiarAtualizacao, atualizarMensagem, json, mensagemEfemera } from '../respostas.js';
@@ -43,9 +44,9 @@ export function tratarEnvioDoModal(interacao) {
     texto,
     link: resultadoLink.link,
     unix,
-    aviso: campos.aviso || null,
     // Sem escolha ainda: o botão Publicar nasce desabilitado.
     escolha: null,
+    autora: lerAutora(interacao),
   });
 
   return json({
@@ -81,7 +82,8 @@ export function tratarComponente(interacao, env, ctx) {
     return atualizarMensagem({
       // O conteúdo precisa ir junto: o que não é enviado no update fica como estava.
       content: textoDaPrevia(escolha),
-      embeds: [montarEmbedPrevia({ ...dados, escolha })],
+      // A autora é relida da interação a cada passo, nunca do card.
+      embeds: [montarEmbedPrevia({ ...dados, escolha, autora: lerAutora(interacao) })],
       components: montarComponentes({ escolha }),
       allowed_mentions: { parse: [] },
     });
@@ -94,7 +96,8 @@ export function tratarComponente(interacao, env, ctx) {
     }
 
     // Publicar chama a API, o que não cabe nos 3 segundos da primeira resposta.
-    ctx.waitUntil(publicar(interacao, env, dados));
+    // A autora do anúncio é quem clicou em Publicar, conferida agora.
+    ctx.waitUntil(publicar(interacao, env, { ...dados, autora: lerAutora(interacao) }));
     return adiarAtualizacao();
   }
 

@@ -27,17 +27,9 @@ export const ID_CANCELAR = 'anuncio:cancelar';
 // nome aqui invalida as pré-visualizações que estiverem abertas.
 const CAMPO_LINK = 'Link';
 const CAMPO_QUANDO = 'Quando';
-const CAMPO_AVISO = 'Aviso de conteúdo';
 const CAMPO_MENCAO = 'Mencionar';
 
 const SEM_ESCOLHA = 'Ainda não escolhido';
-
-/**
- * Subtexto do Discord: deixa a linha menor e cinza.
- * Se não renderizar dentro do embed (seção 12), trocar por itálico aqui:
- * `(texto) => `*${texto}*``. É o único lugar que precisa mudar.
- */
-const discreto = (texto) => `-# ${texto}`;
 
 // Um campo de texto do modal, embrulhado no Label (type 18).
 // O `label` do próprio campo de texto está deprecated, por isso ele vem do Label.
@@ -57,7 +49,7 @@ function campoDeTexto({ rotulo, descricao, id, estilo, obrigatorio, exemplo, max
   };
 }
 
-// O modal aceita no máximo 5 componentes de topo, e são exatamente 5 campos.
+// O modal aceita no máximo 5 componentes de topo, e são 4 campos.
 export function montarModal() {
   return {
     custom_id: ID_MODAL,
@@ -79,10 +71,6 @@ export function montarModal() {
         rotulo: 'Data e hora (opcional)', id: 'quando', estilo: CURTO, obrigatorio: false, maximo: 20,
         descricao: 'Formato DD/MM/AAAA HH:MM, horário de Brasília.',
         exemplo: '15/10/2026 19:00',
-      }),
-      campoDeTexto({
-        rotulo: 'Aviso de conteúdo (opcional)', id: 'aviso', estilo: CURTO, obrigatorio: false, maximo: 200,
-        descricao: 'Aparece antes do texto, para quem precisa escolher se quer ler.',
       }),
     ],
   };
@@ -121,13 +109,23 @@ function escolhaDoTexto(texto) {
   return MENCOES.find((item) => !item.id && item.rotulo === texto)?.valor ?? null;
 }
 
+// Bloco author do embed. A autora vem da interação, não do card (seção 8.3).
+function autoriaDoEmbed(autora) {
+  if (!autora?.nome) return {};
+  return {
+    author: {
+      name: `Autora: ${autora.nome}`,
+      ...(autora.iconUrl ? { icon_url: autora.iconUrl } : {}),
+    },
+  };
+}
+
 // Card de pré-visualização. Guarda tudo que o botão Publicar precisa depois.
-export function montarEmbedPrevia({ titulo, texto, link, unix, aviso, escolha }) {
+export function montarEmbedPrevia({ titulo, texto, link, unix, escolha, autora }) {
   const campos = [];
 
   if (link) campos.push({ name: CAMPO_LINK, value: link });
   if (unix) campos.push({ name: CAMPO_QUANDO, value: textoDeQuando(unix) });
-  if (aviso) campos.push({ name: CAMPO_AVISO, value: aviso });
   campos.push({ name: CAMPO_MENCAO, value: textoDaEscolha(escolha) });
 
   return {
@@ -135,6 +133,7 @@ export function montarEmbedPrevia({ titulo, texto, link, unix, aviso, escolha })
     title: titulo,
     description: texto,
     fields: campos,
+    ...autoriaDoEmbed(autora),
     footer: RODAPE,
   };
 }
@@ -148,14 +147,12 @@ export function lerEmbedPrevia(embed) {
     texto: embed.description ?? '',
     link: valor(CAMPO_LINK),
     unix: lerUnixDoTexto(valor(CAMPO_QUANDO)),
-    aviso: valor(CAMPO_AVISO),
     escolha: escolhaDoTexto(valor(CAMPO_MENCAO)),
   };
 }
 
-// Card que vai para o canal de avisos: sem o campo de controle "Mencionar",
-// e com o aviso de conteúdo discreto, antes do texto.
-export function montarEmbedPublicado({ titulo, texto, link, unix, aviso }) {
+// Card que vai para o canal de avisos, sem o campo de controle "Mencionar".
+export function montarEmbedPublicado({ titulo, texto, link, unix, autora }) {
   const campos = [];
   if (link) campos.push({ name: CAMPO_LINK, value: link });
   if (unix) campos.push({ name: CAMPO_QUANDO, value: textoDeQuando(unix) });
@@ -163,8 +160,9 @@ export function montarEmbedPublicado({ titulo, texto, link, unix, aviso }) {
   return {
     color: CORES.ANUNCIO,
     title: titulo,
-    description: aviso ? `${discreto(`Este anúncio fala sobre: ${aviso}`)}\n\n${texto}` : texto,
+    description: texto,
     ...(campos.length ? { fields: campos } : {}),
+    ...autoriaDoEmbed(autora),
     footer: RODAPE,
   };
 }
