@@ -2,23 +2,27 @@
 // A pré-visualização é também o lugar onde o estado mora (seção 7 do CLAUDE.md):
 // o que está no embed é o que vai ser publicado.
 
-import { CORES, MENCOES, MENCOES_AMPLAS, RODAPE } from '../config.js';
+import { CORES, MENCOES, MENCOES_AMPLAS, REACAO_PADRAO, REACOES, RODAPE } from '../config.js';
 import {
   CURTO,
   PARAGRAFO,
   autoriaDoEmbed,
   campoDeTexto,
+  campoDeUpload,
   lerCamposDoModal,
   linhaDeBotoes,
   menuDeSelecao,
   opcoesDaLista,
 } from './comum.js';
+import { MAXIMO_DE_IMAGENS, MAXIMO_EM_MB } from '../anexos.js';
 import { lerUnixDoTexto, textoDeQuando } from '../datas.js';
 
 export { lerCamposDoModal };
 
 export const ID_MODAL = 'anuncio:modal';
 export const ID_MENU_MENCAO = 'anuncio:mencao';
+export const ID_MENU_REACAO = 'anuncio:reacao';
+export const ID_CAMPO_IMAGENS = 'imagens';
 export const ID_PUBLICAR = 'anuncio:publicar';
 export const ID_CANCELAR = 'anuncio:cancelar';
 
@@ -27,10 +31,11 @@ export const ID_CANCELAR = 'anuncio:cancelar';
 const CAMPO_LINK = 'Link';
 const CAMPO_QUANDO = 'Quando';
 const CAMPO_MENCAO = 'Mencionar';
+const CAMPO_REACAO = 'Reação';
 
 const SEM_ESCOLHA = 'Ainda não escolhido';
 
-// O modal aceita no máximo 5 componentes de topo, e são 4 campos.
+// O modal aceita no máximo 5 componentes de topo: 4 campos de texto e o upload.
 export function montarModal() {
   return {
     custom_id: ID_MODAL,
@@ -52,6 +57,11 @@ export function montarModal() {
         rotulo: 'Data e hora (opcional)', id: 'quando', estilo: CURTO, obrigatorio: false, maximo: 20,
         descricao: 'Formato DD/MM/AAAA HH:MM. A hora é lida como horário de Brasília.',
         exemplo: '15/10/2026 19:00',
+      }),
+      campoDeUpload({
+        rotulo: 'Imagens', id: ID_CAMPO_IMAGENS, obrigatorio: false, minimo: 0,
+        maximo: MAXIMO_DE_IMAGENS,
+        descricao: `Opcional. Até ${MAXIMO_DE_IMAGENS} imagens de até ${MAXIMO_EM_MB} MB.`,
       }),
     ],
   };
@@ -75,13 +85,28 @@ function escolhaDoTexto(texto) {
   return MENCOES.find((item) => !item.id && item.rotulo === texto)?.valor ?? null;
 }
 
+// A reação é guardada no card pelo próprio rótulo, que já é o emoji.
+function rotuloDaReacao(reacao) {
+  return REACOES.find((item) => item.valor === (reacao ?? REACAO_PADRAO))?.rotulo ?? 'Nenhuma';
+}
+
+function reacaoDoRotulo(rotulo) {
+  return REACOES.find((item) => item.rotulo === rotulo)?.valor ?? REACAO_PADRAO;
+}
+
+// Emoji da escolha, ou null quando a admin escolheu Nenhuma.
+export function emojiDaReacao(reacao) {
+  return REACOES.find((item) => item.valor === reacao)?.caractere ?? null;
+}
+
 // Card de pré-visualização. Guarda tudo que o botão Publicar precisa depois.
-export function montarEmbedPrevia({ titulo, texto, link, unix, escolha, autora }) {
+export function montarEmbedPrevia({ titulo, texto, link, unix, escolha, reacao, autora }) {
   const campos = [];
 
   if (link) campos.push({ name: CAMPO_LINK, value: link });
   if (unix) campos.push({ name: CAMPO_QUANDO, value: textoDeQuando(unix) });
   campos.push({ name: CAMPO_MENCAO, value: textoDaEscolha(escolha) });
+  campos.push({ name: CAMPO_REACAO, value: rotuloDaReacao(reacao) });
 
   return {
     color: CORES.ANUNCIO,
@@ -103,6 +128,7 @@ export function lerEmbedPrevia(embed) {
     link: valor(CAMPO_LINK),
     unix: lerUnixDoTexto(valor(CAMPO_QUANDO)),
     escolha: escolhaDoTexto(valor(CAMPO_MENCAO)),
+    reacao: reacaoDoRotulo(valor(CAMPO_REACAO)),
   };
 }
 
@@ -124,13 +150,19 @@ export function montarEmbedPublicado({ titulo, texto, link, unix, autora }) {
 
 // Menu de menção e botões. O Publicar só habilita depois de uma escolha explícita,
 // para ninguém publicar achando que avisou alguém, nem notificar o servidor sem querer.
-export function montarComponentes({ escolha } = {}) {
+export function montarComponentes({ escolha, reacao = REACAO_PADRAO } = {}) {
   return [
     menuDeSelecao({
       id: ID_MENU_MENCAO,
       convite: 'Quem deve ser avisada?',
       opcoes: opcoesDaLista(MENCOES, escolha),
     }),
+    menuDeSelecao({
+      id: ID_MENU_REACAO,
+      convite: 'Deixo alguma reação no anúncio?',
+      opcoes: opcoesDaLista(REACOES, reacao),
+    }),
+    // Só a menção trava o botão: a reação já tem padrão.
     linhaDeBotoes({ idPublicar: ID_PUBLICAR, idCancelar: ID_CANCELAR, habilitado: Boolean(escolha) }),
   ];
 }

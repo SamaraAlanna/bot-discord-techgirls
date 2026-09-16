@@ -29,11 +29,36 @@ afterEach(() => {
 });
 
 // Espião de API: devolve sempre 200, ou o status combinado para um caminho.
-function espionarApi({ falharEm } = {}) {
+// Aceita corpo JSON e corpo multipart: com imagens, o payload vai em payload_json.
+function lerCorpo(corpo) {
+  if (typeof corpo === 'string') return JSON.parse(corpo);
+  if (corpo instanceof FormData) return JSON.parse(corpo.get('payload_json'));
+  return null;
+}
+
+function arquivosDoCorpo(corpo) {
+  if (!(corpo instanceof FormData)) return [];
+  return [...corpo.entries()]
+    .filter(([chave]) => chave.startsWith('files['))
+    .map(([chave, valor]) => ({ chave, nome: valor.name, tipo: valor.type, tamanho: valor.size }));
+}
+
+function espionarApi({ falharEm, statusDoCdn = 200 } = {}) {
   const chamadas = [];
-  globalThis.fetch = async (url, opcoes) => {
-    chamadas.push({ url: String(url), metodo: opcoes.method, corpo: JSON.parse(opcoes.body) });
-    if (falharEm && String(url).includes(falharEm)) {
+  globalThis.fetch = async (url, opcoes = {}) => {
+    const endereco = String(url);
+    chamadas.push({
+      url: endereco,
+      metodo: opcoes.method ?? 'GET',
+      corpo: lerCorpo(opcoes.body),
+      arquivos: arquivosDoCorpo(opcoes.body),
+    });
+
+    if (endereco.includes('cdn.discordapp.com')) {
+      if (statusDoCdn !== 200) return new Response('erro', { status: statusDoCdn });
+      return new Response(new Uint8Array(2048), { status: 200 });
+    }
+    if (falharEm && endereco.includes(falharEm)) {
       return new Response('{"message":"Missing Access"}', { status: 403 });
     }
     return new Response(JSON.stringify({ id: 'MSG1' }), { status: 200 });
@@ -43,6 +68,10 @@ function espionarApi({ falharEm } = {}) {
     publicacao: () => chamadas.find((c) => c.url.includes('/channels/CA/messages')),
     log: () => chamadas.find((c) => c.url.includes('/channels/CL/messages')),
     fechamento: () => chamadas.find((c) => c.metodo === 'PATCH'),
+    // POST no webhook é mensagem nova; o PATCH é o fechamento da resposta adiada.
+    acompanhamento: () => chamadas.find((c) => c.url.includes('/webhooks/') && c.metodo === 'POST'),
+    downloads: () => chamadas.filter((c) => c.url.includes('cdn.discordapp.com')),
+    reacao: () => chamadas.find((c) => c.url.includes('/reactions/')),
   };
 }
 
@@ -70,14 +99,24 @@ const envioDeModal = (campos, membro = MEMBRO) => ({
   },
 });
 
-const componente = (custom_id, { embed, values, membro = MEMBRO } = {}) => ({
+const componente = (custom_id, { embed, values, membro = MEMBRO, anexos = [] } = {}) => ({
   type: 3,
   application_id: 'APP',
   token: 'token-da-interacao',
   guild_id: 'G1',
   member: membro,
-  message: { embeds: embed ? [embed] : [] },
+  message: { embeds: embed ? [embed] : [], attachments: anexos },
   data: { custom_id, ...(values ? { values } : {}) },
+});
+
+// Anexo como o Discord entrega: mídia efêmera, com URL assinada.
+const anexo = (chave, filename, content_type, size = 2048) => ({
+  id: chave,
+  filename,
+  content_type,
+  size,
+  url: `https://cdn.discordapp.com/ephemeral-attachments/1/2/${filename}?ex=aa&is=bb&hm=cc`,
+  ephemeral: true,
 });
 
 const responder = async (interacao) => JSON.parse(await (await rotear(interacao, env, ctx)).text());
@@ -89,6 +128,18 @@ const ANUNCIO_BASE = {
   quando: '15/10/2026 19:00',
 };
 
+// Envio de modal com o campo de upload preenchido.
+const envioComImagens = (anexos, campos = ANUNCIO_BASE) => {
+  const interacao = envioDeModal(campos);
+  interacao.data.components.push({
+    type: 18,
+    id: 9,
+    component: { type: 19, id: 10, custom_id: 'imagens', values: anexos.map((item) => item.id) },
+  });
+  interacao.data.resolved = { attachments: Object.fromEntries(anexos.map((item) => [item.id, item])) };
+  return interacao;
+};
+
 // Atalho: envia o modal, escolhe uma menção e devolve o card pronto para publicar.
 async function cardPronto(escolha, campos = ANUNCIO_BASE, membro = MEMBRO) {
   const previa = (await responder(envioDeModal(campos, membro))).data.embeds[0];
@@ -97,16 +148,22 @@ async function cardPronto(escolha, campos = ANUNCIO_BASE, membro = MEMBRO) {
 }
 
 describe('envio do modal', () => {
-  test('tem quatro campos, sem aviso de conteúdo', async () => {
+  test('tem quatro campos de texto e o upload de imagens', async () => {
     const { comandoAnuncio } = await import('../src/comandos/anuncio.js');
     const modal = JSON.parse(await comandoAnuncio().text()).data;
 
-    assert.equal(modal.components.length, 4);
+    assert.equal(modal.components.length, 5, 'o modal aceita no máximo 5 componentes de topo');
     assert.deepEqual(
       modal.components.map((label) => label.component.custom_id),
-      ['titulo', 'texto', 'link', 'quando'],
+      ['titulo', 'texto', 'link', 'quando', 'imagens'],
     );
     assert.equal(modal.components.every((label) => label.type === 18), true, 'todo campo vem em Label');
+
+    const upload = modal.components[4].component;
+    assert.equal(upload.type, 19);
+    assert.equal(upload.required, false);
+    assert.equal(upload.max_values, 4);
+    assert.equal(modal.components[4].description, 'Opcional. Até 4 imagens de até 5 MB.');
   });
 
   test('gera pré-visualização efêmera com Publicar desabilitado', async () => {
@@ -121,7 +178,7 @@ describe('envio do modal', () => {
     assert.equal(embed.title, 'Mentoria de carreira');
     assert.equal(embed.description, 'Inscrições abertas.');
     assert.equal(campo(embed, 'Mencionar'), 'Ainda não escolhido');
-    assert.equal(resposta.data.components[1].components[0].disabled, true);
+    assert.equal(resposta.data.components[2].components[0].disabled, true);
   });
 
   test('o campo Quando mostra só o timestamp nativo', async () => {
@@ -246,7 +303,7 @@ describe('escolha da menção', () => {
 
     assert.equal(resposta.type, 7);
     assert.equal(campo(resposta.data.embeds[0], 'Mencionar'), `<@&${ID_SUPORTE}>`);
-    assert.equal(resposta.data.components[1].components[0].disabled, false);
+    assert.equal(resposta.data.components[2].components[0].disabled, false);
     assert.equal(resposta.data.components[0].components[0].options.find((o) => o.value === 'suporte').default, true);
   });
 
@@ -273,7 +330,7 @@ describe('escolha da menção', () => {
 
     assert.doesNotMatch(resposta.data.content, /Atenção/);
     assert.equal(campo(resposta.data.embeds[0], 'Mencionar'), 'Ninguém');
-    assert.equal(resposta.data.components[1].components[0].disabled, false);
+    assert.equal(resposta.data.components[2].components[0].disabled, false);
   });
 });
 
@@ -388,6 +445,188 @@ describe('publicar', () => {
     const resposta = await responder(componente('anuncio:publicar', {}));
     assert.match(resposta.data.content, /use \/anuncio de novo/);
     assert.equal(resposta.data.flags, 64);
+  });
+});
+
+describe('imagens no anúncio', () => {
+  test('a pré-visualização não lista arquivos, só anexa as imagens', async () => {
+    const api = espionarApi();
+    await responder(envioComImagens([anexo('0', 'cartaz.png', 'image/png')]));
+    await esperarPendentes();
+
+    const conteudo = api.acompanhamento().corpo.content;
+    assert.equal(conteudo, 'Confira como vai ficar e escolha quem deve ser avisada.');
+    assert.equal(api.acompanhamento().arquivos.length, 1, 'a imagem vai anexada');
+  });
+
+  test('modal com imagens adia e manda a pré-visualização em multipart', async () => {
+    const api = espionarApi();
+    const anexos = [anexo('0', 'cartaz.png', 'image/png'), anexo('1', 'foto.jpg', 'image/jpeg')];
+
+    const resposta = await responder(envioComImagens(anexos));
+    assert.equal(resposta.type, 5, 'resposta adiada: baixar arquivo não cabe em 3 segundos');
+    assert.equal(resposta.data.flags, 64);
+
+    await esperarPendentes();
+
+    assert.equal(api.downloads().length, 2);
+    const acompanhamento = api.acompanhamento();
+    assert.deepEqual(acompanhamento.arquivos.map((a) => a.chave), ['files[0]', 'files[1]']);
+    assert.deepEqual(acompanhamento.arquivos.map((a) => a.nome), ['cartaz.png', 'foto.jpg']);
+    assert.deepEqual(acompanhamento.corpo.attachments, [
+      { id: 0, filename: 'cartaz.png' },
+      { id: 1, filename: 'foto.jpg' },
+    ]);
+    assert.equal(acompanhamento.corpo.flags, 64, 'a pré-visualização continua efêmera');
+    assert.equal(acompanhamento.corpo.embeds[0].title, 'Mentoria de carreira');
+    assert.equal(acompanhamento.corpo.components.length, 3);
+  });
+
+  test('arquivo que não é imagem é recusado antes de baixar', async () => {
+    const api = espionarApi();
+    const resposta = await responder(envioComImagens([anexo('0', 'contrato.pdf', 'application/pdf')]));
+
+    assert.equal(resposta.type, 4);
+    assert.equal(resposta.data.flags, 64);
+    assert.equal(resposta.data.content, 'Só dá para anexar imagens (PNG, JPG, GIF ou WEBP).');
+    assert.doesNotMatch(resposta.data.content, /contrato/i, 'sem nome de arquivo na frase');
+    assert.equal(api.chamadas.length, 0, 'nada foi baixado');
+  });
+
+  test('imagem acima do limite é recusada sem citar arquivo nem tamanho', async () => {
+    const api = espionarApi();
+    const grande = anexo('0', 'enorme.png', 'image/png', 9 * 1024 * 1024);
+    const resposta = await responder(envioComImagens([grande]));
+
+    assert.equal(resposta.data.content, 'Uma das imagens passa de 5 MB. Diminua o tamanho e tente de novo.');
+    assert.doesNotMatch(resposta.data.content, /enorme|9/, 'sem nome de arquivo nem o tamanho do que veio');
+    assert.equal(api.chamadas.length, 0);
+  });
+
+  test('mais de quatro imagens é recusado', async () => {
+    const cinco = [0, 1, 2, 3, 4].map((n) => anexo(String(n), `f${n}.png`, 'image/png'));
+    const resposta = await responder(envioComImagens(cinco));
+
+    assert.equal(resposta.data.content, 'Dá para anexar no máximo 4 imagens. Tire algumas e tente de novo.');
+  });
+
+  test('falha no download avisa a admin sem deixar pré-visualização pela metade', async () => {
+    const api = espionarApi({ statusDoCdn: 403 });
+    await responder(envioComImagens([anexo('0', 'cartaz.png', 'image/png')]));
+    await esperarPendentes();
+
+    assert.equal(api.acompanhamento(), undefined, 'nenhuma pré-visualização foi enviada');
+    assert.equal(api.fechamento().corpo.content, 'Não consegui carregar as imagens. Use /anuncio de novo.');
+  });
+
+  test('escolher no menu não perde os anexos já subidos', async () => {
+    espionarApi();
+    const previa = (await responder(envioDeModal(ANUNCIO_BASE))).data.embeds[0];
+    const anexos = [anexo('111', 'cartaz.png', 'image/png')];
+
+    const resposta = await responder(componente('anuncio:mencao', { embed: previa, values: ['suporte'], anexos }));
+
+    // Na v10, editar sem mandar attachments apaga os anexos existentes.
+    assert.deepEqual(resposta.data.attachments, [{ id: '111', filename: 'cartaz.png' }]);
+  });
+
+  test('cancelar limpa os anexos junto com o resto', async () => {
+    espionarApi();
+    const resposta = await responder(componente('anuncio:cancelar', { anexos: [anexo('111', 'c.png', 'image/png')] }));
+    assert.deepEqual(resposta.data.attachments, []);
+  });
+
+  test('publicar baixa dos anexos do clique e envia junto com o anúncio', async () => {
+    const api = espionarApi();
+    const anexos = [anexo('111', 'cartaz.png', 'image/png')];
+    const card = await cardPronto('ninguem');
+
+    await responder(componente('anuncio:publicar', { embed: card, anexos }));
+    await esperarPendentes();
+
+    assert.equal(api.downloads().length, 1);
+    const publicacao = api.publicacao();
+    assert.deepEqual(publicacao.arquivos.map((a) => a.nome), ['cartaz.png']);
+    assert.deepEqual(publicacao.corpo.attachments, [{ id: 0, filename: 'cartaz.png' }]);
+    assert.deepEqual(publicacao.corpo.allowed_mentions, { parse: [] });
+    assert.match(api.fechamento().corpo.content, /Anúncio publicado: /);
+  });
+
+  test('se o download falhar no Publicar, nada é publicado', async () => {
+    const api = espionarApi({ statusDoCdn: 403 });
+    const card = await cardPronto('ninguem');
+
+    await responder(componente('anuncio:publicar', { embed: card, anexos: [anexo('111', 'c.png', 'image/png')] }));
+    await esperarPendentes();
+
+    assert.equal(api.publicacao(), undefined, 'o canal de avisos não foi tocado');
+    assert.equal(api.log(), undefined, 'nem o log');
+    assert.match(api.fechamento().corpo.content, /Não consegui publicar o anúncio/);
+  });
+});
+
+describe('reação', () => {
+  test('o menu traz as seis opções, com Nenhuma marcada', async () => {
+    const resposta = await responder(envioDeModal(ANUNCIO_BASE));
+    const menu = resposta.data.components[1].components[0];
+
+    assert.equal(menu.custom_id, 'anuncio:reacao');
+    assert.deepEqual(menu.options.map((o) => o.label), ['Nenhuma', '💜', '🎉', '📚', '👀', '✅']);
+    assert.equal(menu.options.find((o) => o.value === 'nenhuma').default, true);
+  });
+
+  test('escolher reação não habilita Publicar sozinha', async () => {
+    const previa = (await responder(envioDeModal(ANUNCIO_BASE))).data.embeds[0];
+    const resposta = await responder(componente('anuncio:reacao', { embed: previa, values: ['festa'] }));
+
+    assert.equal(campo(resposta.data.embeds[0], 'Reação'), '🎉');
+    assert.equal(resposta.data.components[2].components[0].disabled, true, 'a menção é que destrava');
+  });
+
+  test('a reação escolhida sobrevive à escolha da menção', async () => {
+    const previa = (await responder(envioDeModal(ANUNCIO_BASE))).data.embeds[0];
+    const comReacao = (await responder(componente('anuncio:reacao', { embed: previa, values: ['roxo'] }))).data.embeds[0];
+    const resposta = await responder(componente('anuncio:mencao', { embed: comReacao, values: ['suporte'] }));
+
+    assert.equal(campo(resposta.data.embeds[0], 'Reação'), '💜');
+    assert.equal(resposta.data.components[1].components[0].options.find((o) => o.value === 'roxo').default, true);
+    assert.equal(resposta.data.components[2].components[0].disabled, false);
+  });
+
+  test('publicar reage com o emoji codificado na URL', async () => {
+    const api = espionarApi();
+    const previa = (await responder(envioDeModal(ANUNCIO_BASE))).data.embeds[0];
+    const comReacao = (await responder(componente('anuncio:reacao', { embed: previa, values: ['roxo'] }))).data.embeds[0];
+    const card = (await responder(componente('anuncio:mencao', { embed: comReacao, values: ['ninguem'] }))).data.embeds[0];
+
+    await responder(componente('anuncio:publicar', { embed: card }));
+    await esperarPendentes();
+
+    const reacao = api.reacao();
+    assert.equal(reacao.metodo, 'PUT');
+    assert.equal(reacao.url, 'https://discord.com/api/v10/channels/CA/messages/MSG1/reactions/%F0%9F%92%9C/@me');
+  });
+
+  test('com Nenhuma, o bot não reage', async () => {
+    const api = espionarApi();
+    await responder(componente('anuncio:publicar', { embed: await cardPronto('ninguem') }));
+    await esperarPendentes();
+
+    assert.equal(api.reacao(), undefined);
+  });
+
+  test('falha ao reagir não impede publicação, log nem confirmação', async () => {
+    const api = espionarApi({ falharEm: '/reactions/' });
+    const previa = (await responder(envioDeModal(ANUNCIO_BASE))).data.embeds[0];
+    const comReacao = (await responder(componente('anuncio:reacao', { embed: previa, values: ['confirmado'] }))).data.embeds[0];
+    const card = (await responder(componente('anuncio:mencao', { embed: comReacao, values: ['ninguem'] }))).data.embeds[0];
+
+    await responder(componente('anuncio:publicar', { embed: card }));
+    await esperarPendentes();
+
+    assert.ok(api.publicacao(), 'o anúncio saiu');
+    assert.ok(api.log(), 'o log foi escrito');
+    assert.match(api.fechamento().corpo.content, /Anúncio publicado: /);
   });
 });
 

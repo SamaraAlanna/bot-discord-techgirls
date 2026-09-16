@@ -38,6 +38,49 @@ export function editarRespostaOriginal(applicationId, tokenDaInteracao, corpo) {
   return chamarDiscord('PATCH', `/webhooks/${applicationId}/${tokenDaInteracao}/messages/@original`, { corpo });
 }
 
+/**
+ * Envia arquivos junto com um payload JSON, em multipart/form-data.
+ * O corpo vai como `payload_json` mais `files[n]`, que é o formato da doc de uploads.
+ * Não definimos content-type na mão: o fetch monta o boundary sozinho.
+ */
+export async function enviarArquivos(caminho, { token, payload, arquivos = [] }) {
+  const formulario = new FormData();
+  formulario.append('payload_json', JSON.stringify(payload));
+
+  arquivos.forEach((arquivo, indice) => {
+    formulario.append(`files[${indice}]`, new Blob([arquivo.bytes], { type: arquivo.tipo }), arquivo.nome);
+  });
+
+  const resposta = await fetch(API + caminho, {
+    method: 'POST',
+    headers: {
+      'user-agent': USER_AGENT,
+      ...(token ? { authorization: `Bot ${token}` } : {}),
+    },
+    body: formulario,
+  });
+
+  const texto = await resposta.text();
+  if (!resposta.ok) {
+    throw new Error(`POST ${caminho} devolveu ${resposta.status}: ${texto.slice(0, 600)}`);
+  }
+  return texto ? JSON.parse(texto) : null;
+}
+
+// Mensagem de acompanhamento de uma interação, usada depois de uma resposta adiada.
+export function caminhoDeAcompanhamento(applicationId, tokenDaInteracao) {
+  return `/webhooks/${applicationId}/${tokenDaInteracao}`;
+}
+
+/**
+ * Reage a uma mensagem com um emoji unicode.
+ * O emoji precisa ir codificado na URL, senão a API responde 10014 Unknown Emoji.
+ */
+export function reagir(canalId, mensagemId, emoji, token) {
+  const codificado = encodeURIComponent(emoji);
+  return chamarDiscord('PUT', `/channels/${canalId}/messages/${mensagemId}/reactions/${codificado}/@me`, { token });
+}
+
 export function linkDaMensagem(guildId, canalId, mensagemId) {
   return `https://discord.com/channels/${guildId}/${canalId}/${mensagemId}`;
 }

@@ -63,6 +63,20 @@ export const MENCOES = [
 // As duas que notificam o servidor inteiro, e por isso ganham aviso na pré-visualização.
 export const MENCOES_AMPLAS = ['everyone', 'here'];
 
+// Reações que o bot pode deixar no anúncio recém-publicado (seção 9.7).
+// `caractere` é o que vai codificado na URL da API de reação.
+export const REACOES = [
+  { valor: 'nenhuma', rotulo: 'Nenhuma', descricao: 'Publica sem reagir' },
+  { valor: 'roxo', rotulo: '💜', caractere: '💜', descricao: 'Carinho e apoio' },
+  { valor: 'festa', rotulo: '🎉', caractere: '🎉', descricao: 'Comemoração' },
+  { valor: 'estudo', rotulo: '📚', caractere: '📚', descricao: 'Conteúdo para estudar' },
+  { valor: 'olhos', rotulo: '👀', caractere: '👀', descricao: 'Fica de olho' },
+  { valor: 'confirmado', rotulo: '✅', caractere: '✅', descricao: 'Confirmação de presença' },
+];
+
+// A reação já nasce escolhida, então ela não trava o botão Publicar.
+export const REACAO_PADRAO = 'nenhuma';
+
 // Busca por valor, do jeito que os menus devolvem a escolha.
 export function acharPorValor(lista, valor) {
   return lista.find((item) => item.valor === valor) ?? null;

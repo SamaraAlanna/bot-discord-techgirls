@@ -6,6 +6,7 @@ export const BOTAO = 2;
 export const MENU_DE_TEXTO = 3;
 export const CAMPO_DE_TEXTO = 4;
 export const LABEL = 18;
+export const UPLOAD_DE_ARQUIVO = 19;
 
 // Estilos de campo de texto.
 export const CURTO = 1;
@@ -42,11 +43,31 @@ export function lerCamposDoModal(componentes, destino = {}) {
     if (componente.custom_id && typeof componente.value === 'string') {
       destino[componente.custom_id] = componente.value.trim();
     }
+    // O campo de upload não devolve texto: devolve as chaves de resolved.attachments.
+    if (componente.custom_id && Array.isArray(componente.values)) {
+      destino[componente.custom_id] = componente.values;
+    }
     if (componente.component) lerCamposDoModal([componente.component], destino);
     if (componente.components) lerCamposDoModal(componente.components, destino);
   }
   return destino;
 }
+// Campo de upload de arquivo do modal (type 19), também embrulhado no Label.
+export function campoDeUpload({ rotulo, descricao, id, obrigatorio = false, minimo, maximo }) {
+  return {
+    type: LABEL,
+    label: rotulo,
+    ...(descricao ? { description: descricao } : {}),
+    component: {
+      type: UPLOAD_DE_ARQUIVO,
+      custom_id: id,
+      required: obrigatorio,
+      ...(minimo === undefined ? {} : { min_values: minimo }),
+      ...(maximo === undefined ? {} : { max_values: maximo }),
+    },
+  };
+}
+
 // Menu de escolha única, já dentro da action row que o Discord exige em mensagem.
 export function menuDeSelecao({ id, convite, opcoes }) {
   return {
