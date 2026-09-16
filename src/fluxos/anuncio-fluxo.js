@@ -12,7 +12,7 @@ import {
   montarEmbedPublicado,
   textoDaPrevia,
 } from '../componentes/anuncio-componentes.js';
-import { criarMensagem, editarRespostaOriginal, linkDaMensagem } from '../discord-api.js';
+import { concluirInteracao, criarMensagem, linkDaMensagem } from '../discord-api.js';
 import { lerAutora } from '../autora.js';
 import { lerDataBrasilia } from '../datas.js';
 import { registrarNoLog } from '../log.js';
@@ -127,22 +127,9 @@ async function publicar(interacao, env, dados) {
     // Log nunca interrompe: registrarNoLog trata o próprio erro.
     await registrarNoLog(env, { acao: 'Anúncio publicado', adminId, link });
 
-    await concluir(interacao, `Anúncio publicado: ${link}`);
+    await concluirInteracao(interacao, `Anúncio publicado: ${link}`);
   } catch (erro) {
     console.error('Falha ao publicar o anúncio:', erro);
-    await concluir(interacao, 'Não consegui publicar o anúncio, tente de novo em instantes.');
-  }
-}
-
-async function concluir(interacao, conteudo) {
-  try {
-    await editarRespostaOriginal(interacao.application_id, interacao.token, {
-      content: conteudo,
-      embeds: [],
-      components: [],
-      allowed_mentions: { parse: [] },
-    });
-  } catch (erro) {
-    console.error('Falha ao fechar a pré-visualização:', erro);
+    await concluirInteracao(interacao, 'Não consegui publicar o anúncio, tente de novo em instantes.');
   }
 }

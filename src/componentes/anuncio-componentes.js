@@ -3,20 +3,19 @@
 // o que está no embed é o que vai ser publicado.
 
 import { CORES, MENCOES, MENCOES_AMPLAS, RODAPE } from '../config.js';
+import {
+  CURTO,
+  PARAGRAFO,
+  autoriaDoEmbed,
+  campoDeTexto,
+  lerCamposDoModal,
+  linhaDeBotoes,
+  menuDeSelecao,
+  opcoesDaLista,
+} from './comum.js';
 import { lerUnixDoTexto, textoDeQuando } from '../datas.js';
 
-// Tipos de componente da API.
-const ACTION_ROW = 1;
-const BOTAO = 2;
-const MENU_DE_TEXTO = 3;
-const CAMPO_DE_TEXTO = 4;
-const LABEL = 18;
-
-// Estilos de campo de texto e de botão.
-const CURTO = 1;
-const PARAGRAFO = 2;
-const BOTAO_VERDE = 3;
-const BOTAO_VERMELHO = 4;
+export { lerCamposDoModal };
 
 export const ID_MODAL = 'anuncio:modal';
 export const ID_MENU_MENCAO = 'anuncio:mencao';
@@ -30,24 +29,6 @@ const CAMPO_QUANDO = 'Quando';
 const CAMPO_MENCAO = 'Mencionar';
 
 const SEM_ESCOLHA = 'Ainda não escolhido';
-
-// Um campo de texto do modal, embrulhado no Label (type 18).
-// O `label` do próprio campo de texto está deprecated, por isso ele vem do Label.
-function campoDeTexto({ rotulo, descricao, id, estilo, obrigatorio, exemplo, maximo }) {
-  return {
-    type: LABEL,
-    label: rotulo,
-    ...(descricao ? { description: descricao } : {}),
-    component: {
-      type: CAMPO_DE_TEXTO,
-      custom_id: id,
-      style: estilo,
-      required: obrigatorio,
-      ...(exemplo ? { placeholder: exemplo } : {}),
-      ...(maximo ? { max_length: maximo } : {}),
-    },
-  };
-}
 
 // O modal aceita no máximo 5 componentes de topo, e são 4 campos.
 export function montarModal() {
@@ -76,21 +57,6 @@ export function montarModal() {
   };
 }
 
-/**
- * Lê os valores enviados no modal. A doc mostra o campo de texto aninhado dentro
- * do Label, mas percorremos a árvore inteira: se o formato mudar, continua funcionando.
- */
-export function lerCamposDoModal(componentes, destino = {}) {
-  for (const componente of componentes ?? []) {
-    if (componente.custom_id && typeof componente.value === 'string') {
-      destino[componente.custom_id] = componente.value.trim();
-    }
-    if (componente.component) lerCamposDoModal([componente.component], destino);
-    if (componente.components) lerCamposDoModal(componente.components, destino);
-  }
-  return destino;
-}
-
 // Texto que representa cada escolha dentro do card. É daqui que a escolha é relida
 // na hora de publicar. Menção dentro de embed não notifica ninguém.
 function textoDaEscolha(escolha) {
@@ -107,17 +73,6 @@ function escolhaDoTexto(texto) {
   if (porCargo) return MENCOES.find((item) => item.id === porCargo)?.valor ?? null;
 
   return MENCOES.find((item) => !item.id && item.rotulo === texto)?.valor ?? null;
-}
-
-// Bloco author do embed. A autora vem da interação, não do card (seção 8.3).
-function autoriaDoEmbed(autora) {
-  if (!autora?.nome) return {};
-  return {
-    author: {
-      name: `Autora: ${autora.nome}`,
-      ...(autora.iconUrl ? { icon_url: autora.iconUrl } : {}),
-    },
-  };
 }
 
 // Card de pré-visualização. Guarda tudo que o botão Publicar precisa depois.
@@ -170,37 +125,13 @@ export function montarEmbedPublicado({ titulo, texto, link, unix, autora }) {
 // Menu de menção e botões. O Publicar só habilita depois de uma escolha explícita,
 // para ninguém publicar achando que avisou alguém, nem notificar o servidor sem querer.
 export function montarComponentes({ escolha } = {}) {
-  const opcoes = MENCOES.map((item) => ({
-    label: item.rotulo,
-    value: item.valor,
-    description: item.descricao,
-    ...(item.emoji ? { emoji: { name: item.emoji } } : {}),
-    default: escolha === item.valor,
-  }));
-
   return [
-    {
-      type: ACTION_ROW,
-      components: [{
-        type: MENU_DE_TEXTO,
-        custom_id: ID_MENU_MENCAO,
-        placeholder: 'Quem deve ser avisada?',
-        options: opcoes,
-      }],
-    },
-    {
-      type: ACTION_ROW,
-      components: [
-        {
-          type: BOTAO,
-          style: BOTAO_VERDE,
-          custom_id: ID_PUBLICAR,
-          label: 'Publicar',
-          disabled: !escolha,
-        },
-        { type: BOTAO, style: BOTAO_VERMELHO, custom_id: ID_CANCELAR, label: 'Cancelar' },
-      ],
-    },
+    menuDeSelecao({
+      id: ID_MENU_MENCAO,
+      convite: 'Quem deve ser avisada?',
+      opcoes: opcoesDaLista(MENCOES, escolha),
+    }),
+    linhaDeBotoes({ idPublicar: ID_PUBLICAR, idCancelar: ID_CANCELAR, habilitado: Boolean(escolha) }),
   ];
 }
 

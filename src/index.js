@@ -1,7 +1,9 @@
 // Entrada do Worker: valida o método, confere a assinatura e roteia a interação.
 
 import { comandoAnuncio } from './comandos/anuncio.js';
-import { tratarComponente, tratarEnvioDoModal } from './fluxos/anuncio-fluxo.js';
+import { comandoVaga } from './comandos/vaga.js';
+import * as fluxoDeAnuncio from './fluxos/anuncio-fluxo.js';
+import * as fluxoDeVaga from './fluxos/vaga-fluxo.js';
 import { json, mensagemEfemera, pong, TIPO_INTERACAO } from './respostas.js';
 import { verificarAssinatura } from './verificar.js';
 
@@ -70,14 +72,15 @@ function rotearComando(interacao) {
   const nome = interacao.data?.name;
 
   if (nome === 'anuncio') return comandoAnuncio();
-  if (nome === 'vaga') return mensagemEfemera('Esse comando ainda está sendo construído.');
+  if (nome === 'vaga') return comandoVaga(interacao);
 
   return mensagemEfemera('Não conheço esse comando, ele pode ter sido removido.');
 }
 
 // O custom_id sempre começa com o nome do fluxo, como em "anuncio:publicar" (seção 7).
 const FLUXOS = {
-  anuncio: { tratarComponente, tratarEnvioDoModal },
+  anuncio: fluxoDeAnuncio,
+  vaga: fluxoDeVaga,
 };
 
 function rotearPorPrefixo(interacao, chamar) {

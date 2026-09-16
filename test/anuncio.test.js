@@ -403,7 +403,8 @@ describe('roteamento', () => {
   });
 
   test('componente de fluxo desconhecido não quebra', async () => {
-    const resposta = await responder(componente('vaga:publicar', {}));
+    // Prefixo de um fluxo que não existe: veio de uma versão antiga do bot.
+    const resposta = await responder(componente('sugestao:publicar', {}));
     assert.match(resposta.data.content, /versão antiga/);
   });
 });
