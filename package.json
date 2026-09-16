@@ -7,7 +7,8 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "ids": "node scripts/listar-ids.js"
+    "ids": "node scripts/listar-ids.js",
+    "comandos": "node scripts/registrar-comandos.js"
   },
   "devDependencies": {
     "wrangler": "^4.132.0"
