@@ -1,0 +1,14 @@
+{
+  "name": "bot-tech-girls",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Bot de vagas e anuncios do servidor Tech Girls, em Cloudflare Workers",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^4.132.0"
+  }
+}

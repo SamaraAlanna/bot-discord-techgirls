@@ -1,0 +1,12 @@
+# Copie para .dev.vars e preencha. O .dev.vars nunca vai para o repositorio.
+
+# Secrets (em produção: wrangler secret put NOME)
+DISCORD_TOKEN=
+DISCORD_PUBLIC_KEY=
+DISCORD_APPLICATION_ID=
+
+# Vars do servidor (em produção: seção [vars] do wrangler.toml)
+GUILD_ID=
+CANAL_VAGAS_ID=
+CANAL_ANUNCIOS_ID=
+CANAL_LOG_ID=

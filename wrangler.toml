@@ -1,0 +1,15 @@
+name = "bot-tech-girls"
+main = "src/index.js"
+compatibility_date = "2026-09-16"
+
+# Logs do console visíveis no painel do Cloudflare (disponível no plano gratuito).
+[observability]
+enabled = true
+
+# Valores não secretos. Os secrets (DISCORD_TOKEN, DISCORD_PUBLIC_KEY,
+# DISCORD_APPLICATION_ID) entram por `wrangler secret put`, nunca aqui.
+[vars]
+GUILD_ID = ""
+CANAL_VAGAS_ID = ""
+CANAL_ANUNCIOS_ID = ""
+CANAL_LOG_ID = ""
