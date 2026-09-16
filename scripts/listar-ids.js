@@ -35,7 +35,7 @@ function normalizar(nome) {
 }
 
 // Lê pares CHAVE=VALOR de um arquivo, ignorando comentários e linhas vazias.
-function lerPares(caminho, regex) {
+function lerPares(caminho) {
   let conteudo;
   try {
     conteudo = readFileSync(new URL(caminho, import.meta.url), 'utf8');
@@ -45,16 +45,14 @@ function lerPares(caminho, regex) {
   const pares = {};
   for (const linha of conteudo.split(/\r?\n/)) {
     if (!linha.trim() || linha.trim().startsWith('#')) continue;
-    const achado = linha.match(regex);
+    const achado = linha.match(/^\s*([A-Z_]+)\s*=\s*(.*)$/);
     if (achado) pares[achado[1]] = achado[2].trim().replace(/^["']|["']$/g, '');
   }
   return pares;
 }
 
 function carregarAmbiente() {
-  const dev = lerPares('../.dev.vars', /^\s*([A-Z_]+)\s*=\s*(.*)$/);
-  const toml = lerPares('../wrangler.toml', /^\s*([A-Z_]+)\s*=\s*(.*)$/);
-  return { ...toml, ...dev, ...process.env };
+  return { ...lerPares('../wrangler.toml'), ...lerPares('../.dev.vars'), ...process.env };
 }
 
 async function buscar(caminho, token) {
@@ -69,33 +67,41 @@ async function buscar(caminho, token) {
   return resposta.json();
 }
 
-// Mostra o que foi encontrado e o que está faltando em relação ao CLAUDE.md.
-function conferir(rotulo, esperados, encontrados) {
-  const porNome = new Map(encontrados.map((item) => [normalizar(item.name), item]));
+// Indexa por nome normalizado e guarda os nomes repetidos, que deixariam a escolha ambígua.
+function indexar(itens) {
+  const indice = new Map();
+  const repetidos = [];
+  for (const item of itens) {
+    const chave = normalizar(item.name);
+    if (indice.has(chave)) repetidos.push(item);
+    else indice.set(chave, item);
+  }
+  return { indice, repetidos };
+}
+
+// Mostra o que foi encontrado em um grupo e o que falta. Marca em `usados` o que casou,
+// para no fim sabermos o que sobrou, sem acusar os outros grupos de sobra.
+function conferirGrupo(rotulo, esperados, indice, usados) {
   const faltando = [];
   const linhas = [];
 
   for (const esperado of esperados) {
-    const achado = porNome.get(normalizar(esperado));
-    if (achado) {
-      linhas.push(`  ${achado.id}  ${esperado}`);
-      porNome.delete(normalizar(esperado));
-    } else {
+    const achado = indice.get(normalizar(esperado));
+    if (!achado) {
       faltando.push(esperado);
+      continue;
     }
+    const diferente = achado.name !== esperado ? `  (no servidor: ${achado.name})` : '';
+    linhas.push(`  ${achado.id}  ${esperado}${diferente}`);
+    usados.add(achado.id);
   }
 
   console.log(`\n${rotulo}`);
   console.log(linhas.join('\n') || '  (nenhum encontrado)');
-
   if (faltando.length) {
     console.log(`  ⚠ esperado pelo CLAUDE.md e não encontrado: ${faltando.join(', ')}`);
   }
-  const sobrando = [...porNome.values()];
-  if (sobrando.length) {
-    console.log(`  ⚠ existe no servidor e não está no CLAUDE.md: ${sobrando.map((i) => `${i.name} (${i.id})`).join(', ')}`);
-  }
-  return { faltando, sobrando };
+  return faltando;
 }
 
 async function principal() {
@@ -133,22 +139,42 @@ async function principal() {
   // 2. Tags do fórum de vagas.
   const canalVagas = await buscar(`/channels/${ambiente.CANAL_VAGAS_ID}`, token);
   const tags = canalVagas.available_tags ?? [];
+  const { indice: indiceTags, repetidos: tagsRepetidas } = indexar(tags);
+  const tagsUsadas = new Set();
+
   console.log(`\nTAGS DO FÓRUM (${tags.length} de 20 possíveis)`);
   for (const [grupo, esperadas] of Object.entries(TAGS_ESPERADAS)) {
-    conferir(`Tags: ${grupo}`, esperadas, tags);
+    conferirGrupo(`Tags: ${grupo}`, esperadas, indiceTags, tagsUsadas);
   }
 
-  // 3. Cargos. O bot só consegue mencionar cargo marcado como mencionável.
+  const tagsSobrando = tags.filter((tag) => !tagsUsadas.has(tag.id));
+  if (tagsSobrando.length) {
+    console.log(`\n  ⚠ tags do fórum fora do CLAUDE.md: ${tagsSobrando.map((t) => `${t.name} (${t.id})`).join(', ')}`);
+  }
+  if (tagsRepetidas.length) {
+    console.log(`  ⚠ tags com nome repetido: ${tagsRepetidas.map((t) => `${t.name} (${t.id})`).join(', ')}`);
+  }
+
+  // 3. Cargos. Aqui não listamos o que sobra: o servidor tem dezenas de cargos legítimos
+  // fora da seção 9.3. Interessa o que falta, o que é ambíguo e o que não é mencionável.
   const guilda = await buscar(`/guilds/${ambiente.GUILD_ID}`, token);
   const cargos = guilda.roles ?? [];
-  conferir('CARGOS DE MOMENTO DE CARREIRA', CARGOS_ESPERADOS, cargos);
+  const { indice: indiceCargos, repetidos: cargosRepetidos } = indexar(cargos);
+  conferirGrupo('CARGOS DE MOMENTO DE CARREIRA', CARGOS_ESPERADOS, indiceCargos, new Set());
 
-  const naoMencionaveis = cargos.filter(
-    (cargo) => CARGOS_ESPERADOS.some((nome) => normalizar(nome) === normalizar(cargo.name)) && !cargo.mentionable,
-  );
+  const ehEsperado = (cargo) => CARGOS_ESPERADOS.some((nome) => normalizar(nome) === normalizar(cargo.name));
+  const ambiguos = cargosRepetidos.filter(ehEsperado);
+  if (ambiguos.length) {
+    console.log(`  ⚠ mais de um cargo com esse nome, confira qual é o certo: ${ambiguos.map((c) => `${c.name} (${c.id})`).join(', ')}`);
+  }
+
+  // O bot só consegue mencionar cargo marcado como mencionável no servidor.
+  const naoMencionaveis = cargos.filter((cargo) => ehEsperado(cargo) && !cargo.mentionable);
   if (naoMencionaveis.length) {
     console.log(`  ⚠ não estão mencionáveis: ${naoMencionaveis.map((c) => c.name).join(', ')}`);
     console.log('    Ajuste em Configurações do servidor > Cargos > "Permitir que qualquer pessoa mencione este cargo".');
+  } else {
+    console.log('  Todos os cargos acima estão mencionáveis.');
   }
 
   console.log('\nPronto. Cole a saída acima no chat ou preencha os IDs em src/config.js.');
