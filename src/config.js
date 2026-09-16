@@ -6,8 +6,8 @@
 const cor = (hex) => parseInt(hex.slice(1), 16);
 
 export const CORES = {
-  VAGA: cor('#7341C0'), // roxo-500
-  ANUNCIO: cor('#D81E9E'), // magenta-500
+  VAGA: cor('#D81E9E'), // magenta-500
+  ANUNCIO: cor('#7341C0'), // roxo-500
   ENCERRADA: cor('#4A2A8C'), // roxo-700, também usado no log
 };
 
@@ -44,20 +44,24 @@ export const TAGS_AREA = [
 // Tag de status, aplicada por /vaga encerrar.
 export const TAG_ENCERRADA_ID = '1549751166152343633';
 
-// Cargos mencionáveis em anúncios (seção 9.3). Todos estavam marcados como
-// mencionáveis no servidor em 16/09/2026: o bot não tem permissão de mencionar todos,
-// então desmarcar um deles faz o anúncio sair sem notificar ninguém.
-export const CARGOS = [
-  { valor: 'quero-entrar', rotulo: 'Quero entrar', emoji: '🌱', id: '1549727295953174649' },
-  { valor: 'em-transicao', rotulo: 'Em transição', emoji: '🔄', id: '1549727504867004416' },
-  { valor: 'estagio', rotulo: 'Estágio', emoji: '🎓', id: '1549727596743368725' },
-  { valor: 'trainee', rotulo: 'Trainee', emoji: '🧭', id: '1549727719355326554' },
-  { valor: 'junior', rotulo: 'Júnior', emoji: '💻', id: '1549727955092111440' },
-  { valor: 'pleno', rotulo: 'Pleno', emoji: '🚀', id: '1549728020166869032' },
-  { valor: 'senior', rotulo: 'Sênior', emoji: '⭐', id: '1549728075909046312' },
-  { valor: 'especialista', rotulo: 'Especialista', emoji: '🧠', id: '1549728162655768736' },
-  { valor: 'lideranca', rotulo: 'Liderança', emoji: '👑', id: '1549728215873101824' },
+// Opções do menu de menção do /anuncio, na ordem da seção 9.3.
+// Os cargos de momento de carreira não entram aqui: anúncio é para o servidor inteiro.
+// `id` só existe para cargo; @everyone e @here são menções do próprio Discord.
+export const MENCOES = [
+  { valor: 'ninguem', rotulo: 'Ninguém', descricao: 'Publica sem menção nenhuma' },
+  { valor: 'everyone', rotulo: '@everyone', descricao: 'Notifica todo mundo do servidor' },
+  { valor: 'here', rotulo: '@here', descricao: 'Notifica quem está online agora' },
+  {
+    valor: 'suporte',
+    rotulo: 'Suporte',
+    emoji: '⚙️',
+    id: '1509902310518816908',
+    descricao: 'Notifica o cargo Suporte',
+  },
 ];
+
+// As duas que notificam o servidor inteiro, e por isso ganham aviso na pré-visualização.
+export const MENCOES_AMPLAS = ['everyone', 'here'];
 
 // Busca por valor, do jeito que os menus devolvem a escolha.
 export function acharPorValor(lista, valor) {

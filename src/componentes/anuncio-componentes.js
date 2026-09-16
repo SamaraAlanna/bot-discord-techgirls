@@ -2,7 +2,7 @@
 // A pré-visualização é também o lugar onde o estado mora (seção 7 do CLAUDE.md):
 // o que está no embed é o que vai ser publicado.
 
-import { CARGOS, CORES, RODAPE } from '../config.js';
+import { CORES, MENCOES, MENCOES_AMPLAS, RODAPE } from '../config.js';
 import { lerUnixDoTexto, textoDeQuando } from '../datas.js';
 
 // Tipos de componente da API.
@@ -19,7 +19,7 @@ const BOTAO_VERDE = 3;
 const BOTAO_VERMELHO = 4;
 
 export const ID_MODAL = 'anuncio:modal';
-export const ID_MENU_CARGO = 'anuncio:cargo';
+export const ID_MENU_MENCAO = 'anuncio:mencao';
 export const ID_PUBLICAR = 'anuncio:publicar';
 export const ID_CANCELAR = 'anuncio:cancelar';
 
@@ -28,10 +28,16 @@ export const ID_CANCELAR = 'anuncio:cancelar';
 const CAMPO_LINK = 'Link';
 const CAMPO_QUANDO = 'Quando';
 const CAMPO_AVISO = 'Aviso de conteúdo';
-const CAMPO_CARGO = 'Mencionar';
+const CAMPO_MENCAO = 'Mencionar';
 
 const SEM_ESCOLHA = 'Ainda não escolhido';
-const NINGUEM = 'ninguem';
+
+/**
+ * Subtexto do Discord: deixa a linha menor e cinza.
+ * Se não renderizar dentro do embed (seção 12), trocar por itálico aqui:
+ * `(texto) => `*${texto}*``. É o único lugar que precisa mudar.
+ */
+const discreto = (texto) => `-# ${texto}`;
 
 // Um campo de texto do modal, embrulhado no Label (type 18).
 // O `label` do próprio campo de texto está deprecated, por isso ele vem do Label.
@@ -97,20 +103,32 @@ export function lerCamposDoModal(componentes, destino = {}) {
   return destino;
 }
 
+// Texto que representa cada escolha dentro do card. É daqui que a escolha é relida
+// na hora de publicar. Menção dentro de embed não notifica ninguém.
+function textoDaEscolha(escolha) {
+  const opcao = MENCOES.find((item) => item.valor === escolha);
+  if (!opcao) return SEM_ESCOLHA;
+  if (opcao.id) return `<@&${opcao.id}>`;
+  return opcao.rotulo;
+}
+
+function escolhaDoTexto(texto) {
+  if (!texto || texto === SEM_ESCOLHA) return null;
+
+  const porCargo = texto.match(/<@&(\d+)>/)?.[1];
+  if (porCargo) return MENCOES.find((item) => item.id === porCargo)?.valor ?? null;
+
+  return MENCOES.find((item) => !item.id && item.rotulo === texto)?.valor ?? null;
+}
+
 // Card de pré-visualização. Guarda tudo que o botão Publicar precisa depois.
-export function montarEmbedPrevia({ titulo, texto, link, unix, aviso, cargo }) {
+export function montarEmbedPrevia({ titulo, texto, link, unix, aviso, escolha }) {
   const campos = [];
 
   if (link) campos.push({ name: CAMPO_LINK, value: link });
   if (unix) campos.push({ name: CAMPO_QUANDO, value: textoDeQuando(unix) });
   if (aviso) campos.push({ name: CAMPO_AVISO, value: aviso });
-
-  // O cargo vira menção no campo: fica legível para a admin e fácil de reler na hora
-  // de publicar. Menção dentro de embed não notifica ninguém.
-  campos.push({
-    name: CAMPO_CARGO,
-    value: cargo === undefined ? SEM_ESCOLHA : (cargo === null ? 'Ninguém' : `<@&${cargo}>`),
-  });
+  campos.push({ name: CAMPO_MENCAO, value: textoDaEscolha(escolha) });
 
   return {
     color: CORES.ANUNCIO,
@@ -124,8 +142,6 @@ export function montarEmbedPrevia({ titulo, texto, link, unix, aviso, cargo }) {
 // Caminho inverso: recupera o estado guardado no card.
 export function lerEmbedPrevia(embed) {
   const valor = (nome) => embed.fields?.find((campo) => campo.name === nome)?.value ?? null;
-  const cargoBruto = valor(CAMPO_CARGO);
-  const cargoId = cargoBruto?.match(/<@&(\d+)>/)?.[1] ?? null;
 
   return {
     titulo: embed.title ?? '',
@@ -133,13 +149,12 @@ export function lerEmbedPrevia(embed) {
     link: valor(CAMPO_LINK),
     unix: lerUnixDoTexto(valor(CAMPO_QUANDO)),
     aviso: valor(CAMPO_AVISO),
-    cargoId,
-    escolheuCargo: cargoBruto !== null && cargoBruto !== SEM_ESCOLHA,
+    escolha: escolhaDoTexto(valor(CAMPO_MENCAO)),
   };
 }
 
 // Card que vai para o canal de avisos: sem o campo de controle "Mencionar",
-// e com o aviso de conteúdo antes do texto.
+// e com o aviso de conteúdo discreto, antes do texto.
 export function montarEmbedPublicado({ titulo, texto, link, unix, aviso }) {
   const campos = [];
   if (link) campos.push({ name: CAMPO_LINK, value: link });
@@ -148,36 +163,29 @@ export function montarEmbedPublicado({ titulo, texto, link, unix, aviso }) {
   return {
     color: CORES.ANUNCIO,
     title: titulo,
-    description: aviso ? `⚠️ Aviso de conteúdo: ${aviso}\n\n${texto}` : texto,
+    description: aviso ? `${discreto(`Este anúncio fala sobre: ${aviso}`)}\n\n${texto}` : texto,
     ...(campos.length ? { fields: campos } : {}),
     footer: RODAPE,
   };
 }
 
-// Menu de cargo e botões. O Publicar só habilita depois de uma escolha explícita,
-// para ninguém publicar achando que avisou alguém.
+// Menu de menção e botões. O Publicar só habilita depois de uma escolha explícita,
+// para ninguém publicar achando que avisou alguém, nem notificar o servidor sem querer.
 export function montarComponentes({ escolha } = {}) {
-  const opcoes = [
-    {
-      label: 'Ninguém',
-      value: NINGUEM,
-      description: 'Publica sem mencionar cargo nenhum',
-      default: escolha === NINGUEM,
-    },
-    ...CARGOS.map((cargo) => ({
-      label: cargo.rotulo,
-      value: cargo.valor,
-      emoji: { name: cargo.emoji },
-      default: escolha === cargo.valor,
-    })),
-  ];
+  const opcoes = MENCOES.map((item) => ({
+    label: item.rotulo,
+    value: item.valor,
+    description: item.descricao,
+    ...(item.emoji ? { emoji: { name: item.emoji } } : {}),
+    default: escolha === item.valor,
+  }));
 
   return [
     {
       type: ACTION_ROW,
       components: [{
         type: MENU_DE_TEXTO,
-        custom_id: ID_MENU_CARGO,
+        custom_id: ID_MENU_MENCAO,
         placeholder: 'Quem deve ser avisada?',
         options: opcoes,
       }],
@@ -198,8 +206,30 @@ export function montarComponentes({ escolha } = {}) {
   ];
 }
 
-// Traduz a escolha do menu para o ID do cargo: null quando é "Ninguém".
-export function cargoDaEscolha(escolha) {
-  if (escolha === NINGUEM) return null;
-  return CARGOS.find((cargo) => cargo.valor === escolha)?.id ?? null;
+/**
+ * Conteúdo e allowed_mentions da mensagem publicada.
+ * O content carrega só a menção escolhida, e o allowed_mentions libera só ela:
+ * as duas travas precisam concordar para ninguém ser notificado por engano.
+ */
+export function mencaoParaPublicar(escolha) {
+  const opcao = MENCOES.find((item) => item.valor === escolha);
+
+  if (opcao?.id) {
+    return { content: `<@&${opcao.id}>`, allowed_mentions: { parse: [], roles: [opcao.id] } };
+  }
+  // O tipo "everyone" do parse cobre @everyone e @here, e o content tem só uma das duas.
+  if (escolha === 'everyone') return { content: '@everyone', allowed_mentions: { parse: ['everyone'] } };
+  if (escolha === 'here') return { content: '@here', allowed_mentions: { parse: ['everyone'] } };
+
+  return { content: null, allowed_mentions: { parse: [] } };
+}
+
+// Linha que acompanha a pré-visualização. Avisa quando a escolha alcança o servidor inteiro.
+export function textoDaPrevia(escolha) {
+  if (!MENCOES_AMPLAS.includes(escolha)) {
+    return 'Confira como vai ficar e escolha quem deve ser avisada.';
+  }
+  return escolha === 'here'
+    ? 'Atenção: isso vai notificar todas as pessoas que estão online agora.'
+    : 'Atenção: isso vai notificar todas as pessoas do servidor.';
 }

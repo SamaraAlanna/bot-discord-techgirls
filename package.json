@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
+    "test": "node --test",
     "deploy": "wrangler deploy",
     "ids": "node scripts/listar-ids.js",
     "comandos": "node scripts/registrar-comandos.js"

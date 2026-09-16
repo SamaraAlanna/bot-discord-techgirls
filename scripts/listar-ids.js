@@ -16,10 +16,7 @@ const TAGS_ESPERADAS = {
 };
 
 // Cargos da seção 9.3. O emoji fica fora da comparação: só o nome importa.
-const CARGOS_ESPERADOS = [
-  'Quero entrar', 'Em transição', 'Estágio', 'Trainee', 'Júnior',
-  'Pleno', 'Sênior', 'Especialista', 'Liderança',
-];
+const CARGOS_ESPERADOS = ['Suporte'];
 
 // Compara nomes ignorando acento, caixa, emoji e espaço sobrando.
 function normalizar(nome) {
@@ -114,7 +111,7 @@ async function principal() {
   const guilda = await chamarApi('GET', `/guilds/${ambiente.GUILD_ID}`, { token });
   const cargos = guilda.roles ?? [];
   const { indice: indiceCargos, repetidos: cargosRepetidos } = indexar(cargos);
-  conferirGrupo('CARGOS DE MOMENTO DE CARREIRA', CARGOS_ESPERADOS, indiceCargos, new Set());
+  conferirGrupo('CARGOS MENCIONÁVEIS EM ANÚNCIOS', CARGOS_ESPERADOS, indiceCargos, new Set());
 
   const ehEsperado = (cargo) => CARGOS_ESPERADOS.some((nome) => normalizar(nome) === normalizar(cargo.name));
   const ambiguos = cargosRepetidos.filter(ehEsperado);

@@ -16,8 +16,9 @@ export function validarLink(texto, { obrigatorio = false } = {}) {
   }
 
   try {
+    // new URL() serve só para validar: o link é publicado exatamente como foi digitado.
     const url = new URL(limpo);
-    return { link: url.href, dominio: url.hostname };
+    return { link: limpo, dominio: url.hostname };
   } catch {
     return { erro: 'Esse link não é um endereço válido, confira se não faltou alguma parte.' };
   }

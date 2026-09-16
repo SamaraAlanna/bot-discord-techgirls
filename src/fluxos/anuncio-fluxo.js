@@ -1,15 +1,16 @@
-// Fluxo do /anuncio: envio do modal, escolha do cargo, publicar e cancelar.
+// Fluxo do /anuncio: envio do modal, escolha da menção, publicar e cancelar.
 
 import {
   ID_CANCELAR,
-  ID_MENU_CARGO,
+  ID_MENU_MENCAO,
   ID_PUBLICAR,
-  cargoDaEscolha,
   lerCamposDoModal,
   lerEmbedPrevia,
+  mencaoParaPublicar,
   montarComponentes,
   montarEmbedPrevia,
   montarEmbedPublicado,
+  textoDaPrevia,
 } from '../componentes/anuncio-componentes.js';
 import { criarMensagem, editarRespostaOriginal, linkDaMensagem } from '../discord-api.js';
 import { lerDataBrasilia } from '../datas.js';
@@ -44,13 +45,13 @@ export function tratarEnvioDoModal(interacao) {
     unix,
     aviso: campos.aviso || null,
     // Sem escolha ainda: o botão Publicar nasce desabilitado.
-    cargo: undefined,
+    escolha: null,
   });
 
   return json({
     type: TIPO_RESPOSTA.MENSAGEM,
     data: {
-      content: 'Confira como vai ficar e escolha quem deve ser avisada.',
+      content: textoDaPrevia(null),
       embeds: [embed],
       components: montarComponentes({}),
       flags: EFEMERA,
@@ -73,19 +74,22 @@ export function tratarComponente(interacao, env, ctx) {
     return mensagemEfemera('Não consegui ler a pré-visualização, use /anuncio de novo.');
   }
 
-  if (acao === ID_MENU_CARGO) {
+  if (acao === ID_MENU_MENCAO) {
     const escolha = interacao.data?.values?.[0];
     const dados = lerEmbedPrevia(embed);
 
     return atualizarMensagem({
-      embeds: [montarEmbedPrevia({ ...dados, cargo: cargoDaEscolha(escolha) })],
+      // O conteúdo precisa ir junto: o que não é enviado no update fica como estava.
+      content: textoDaPrevia(escolha),
+      embeds: [montarEmbedPrevia({ ...dados, escolha })],
       components: montarComponentes({ escolha }),
+      allowed_mentions: { parse: [] },
     });
   }
 
   if (acao === ID_PUBLICAR) {
     const dados = lerEmbedPrevia(embed);
-    if (!dados.escolheuCargo) {
+    if (!dados.escolha) {
       return mensagemEfemera('Escolha no menu quem deve ser avisada antes de publicar.');
     }
 
@@ -101,15 +105,16 @@ export function tratarComponente(interacao, env, ctx) {
 async function publicar(interacao, env, dados) {
   const adminId = interacao.member?.user?.id ?? interacao.user?.id;
 
+  // A menção precisa estar no conteúdo: menção dentro de embed não notifica.
+  const mencao = mencaoParaPublicar(dados.escolha);
+
   try {
     const mensagem = await criarMensagem(
       env.CANAL_ANUNCIOS_ID,
       {
-        // A menção precisa estar no conteúdo: menção dentro de embed não notifica.
-        ...(dados.cargoId ? { content: `<@&${dados.cargoId}>` } : {}),
+        ...(mencao.content ? { content: mencao.content } : {}),
         embeds: [montarEmbedPublicado(dados)],
-        // parse vazio derruba @everyone e @here. A lista de cargos libera só o escolhido.
-        allowed_mentions: dados.cargoId ? { parse: [], roles: [dados.cargoId] } : { parse: [] },
+        allowed_mentions: mencao.allowed_mentions,
       },
       env.DISCORD_TOKEN,
     );
