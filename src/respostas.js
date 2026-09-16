@@ -34,6 +34,22 @@ export function pong() {
   return json({ type: TIPO_RESPOSTA.PONG });
 }
 
+// Abre um modal em resposta a um comando.
+export function modal(dados) {
+  return json({ type: TIPO_RESPOSTA.MODAL, data: dados });
+}
+
+// Troca o conteúdo da mensagem que tem o componente acionado.
+export function atualizarMensagem(dados) {
+  return json({ type: TIPO_RESPOSTA.ATUALIZAR_MENSAGEM, data: dados });
+}
+
+// "Estou cuidando disso": segura a interação enquanto a API do Discord responde.
+// Depois disso, a resposta é concluída editando a mensagem original.
+export function adiarAtualizacao() {
+  return json({ type: TIPO_RESPOSTA.ATUALIZACAO_ADIADA });
+}
+
 // Mensagem visível só para quem acionou, sem menções ativas.
 export function mensagemEfemera(conteudo) {
   return json({

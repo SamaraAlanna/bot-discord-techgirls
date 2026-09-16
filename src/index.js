@@ -1,7 +1,9 @@
 // Entrada do Worker: valida o método, confere a assinatura e roteia a interação.
 
-import { verificarAssinatura } from './verificar.js';
+import { comandoAnuncio } from './comandos/anuncio.js';
+import { tratarComponente, tratarEnvioDoModal } from './fluxos/anuncio-fluxo.js';
 import { json, mensagemEfemera, pong, TIPO_INTERACAO } from './respostas.js';
+import { verificarAssinatura } from './verificar.js';
 
 export default {
   async fetch(request, env, ctx) {
@@ -43,19 +45,47 @@ export default {
   },
 };
 
-async function rotear(interacao, env, ctx) {
+// Exportado para teste: o roteamento é o que mais muda a cada comando novo.
+export async function rotear(interacao, env, ctx) {
   switch (interacao.type) {
     // O Discord manda um PING ao salvar a URL no portal e de tempos em tempos depois disso.
     case TIPO_INTERACAO.PING:
       return pong();
 
     case TIPO_INTERACAO.COMANDO:
+      return rotearComando(interacao);
+
     case TIPO_INTERACAO.COMPONENTE:
+      return rotearPorPrefixo(interacao, (fluxo) => fluxo.tratarComponente(interacao, env, ctx));
+
     case TIPO_INTERACAO.ENVIO_DE_MODAL:
-      // Os fluxos entram nas próximas etapas (seção 13 do CLAUDE.md).
-      return mensagemEfemera('Esse comando ainda está sendo construído.');
+      return rotearPorPrefixo(interacao, (fluxo) => fluxo.tratarEnvioDoModal(interacao, env, ctx));
 
     default:
       return json({ erro: 'Tipo de interação não suportado.' }, 400);
   }
+}
+
+function rotearComando(interacao) {
+  const nome = interacao.data?.name;
+
+  if (nome === 'anuncio') return comandoAnuncio();
+  if (nome === 'vaga') return mensagemEfemera('Esse comando ainda está sendo construído.');
+
+  return mensagemEfemera('Não conheço esse comando, ele pode ter sido removido.');
+}
+
+// O custom_id sempre começa com o nome do fluxo, como em "anuncio:publicar" (seção 7).
+const FLUXOS = {
+  anuncio: { tratarComponente, tratarEnvioDoModal },
+};
+
+function rotearPorPrefixo(interacao, chamar) {
+  const prefixo = String(interacao.data?.custom_id ?? '').split(':')[0];
+  const fluxo = FLUXOS[prefixo];
+
+  if (!fluxo) {
+    return mensagemEfemera('Essa tela é de uma versão antiga do bot, use o comando de novo.');
+  }
+  return chamar(fluxo);
 }
