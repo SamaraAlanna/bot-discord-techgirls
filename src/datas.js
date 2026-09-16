@@ -34,21 +34,13 @@ export function lerDataBrasilia(texto) {
   return { unix };
 }
 
-// Volta do unix para o texto em Brasília, para o card mostrar os dois formatos.
-export function formatarBrasilia(unix) {
-  const emBrasilia = new Date((unix - HORAS_ATRAS_DE_UTC * 3600) * 1000);
-  const doisDigitos = (numero) => String(numero).padStart(2, '0');
-
-  const data = `${doisDigitos(emBrasilia.getUTCDate())}/${doisDigitos(emBrasilia.getUTCMonth() + 1)}/${emBrasilia.getUTCFullYear()}`;
-  return `${data} às ${doisDigitos(emBrasilia.getUTCHours())}:${doisDigitos(emBrasilia.getUTCMinutes())}`;
-}
-
 /**
- * Texto do campo "Quando": o timestamp nativo, que cada pessoa vê no próprio fuso,
- * e embaixo o horário de Brasília por extenso, para não deixar dúvida.
+ * Texto do campo "Quando": só o timestamp nativo, que cada pessoa vê no próprio fuso.
+ * A data digitada é lida como horário de Brasília, e quem avisa disso é a descrição
+ * do campo no formulário (seção 8.3 do CLAUDE.md).
  */
 export function textoDeQuando(unix) {
-  return `<t:${unix}:F>\n${formatarBrasilia(unix)}, horário de Brasília`;
+  return `<t:${unix}:F>`;
 }
 
 // Recupera o unix guardado no campo "Quando" da pré-visualização.

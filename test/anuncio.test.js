@@ -124,9 +124,21 @@ describe('envio do modal', () => {
     assert.equal(resposta.data.components[1].components[0].disabled, true);
   });
 
-  test('mostra o timestamp nativo e o horário de Brasília', async () => {
+  test('o campo Quando mostra só o timestamp nativo', async () => {
     const embed = (await responder(envioDeModal(ANUNCIO_BASE))).data.embeds[0];
-    assert.match(campo(embed, 'Quando'), /^<t:\d+:F>\n15\/10\/2026 às 19:00, horário de Brasília$/);
+    const unix = Date.UTC(2026, 9, 15, 22, 0) / 1000;
+
+    assert.equal(campo(embed, 'Quando'), `<t:${unix}:F>`);
+    assert.doesNotMatch(campo(embed, 'Quando'), /Brasília/);
+  });
+
+  test('a descrição do campo avisa que a hora é de Brasília', async () => {
+    const { comandoAnuncio } = await import('../src/comandos/anuncio.js');
+    const modal = JSON.parse(await comandoAnuncio().text()).data;
+    const campoQuando = modal.components.find((label) => label.component.custom_id === 'quando');
+
+    assert.match(campoQuando.description, /horário de Brasília/);
+    assert.match(campoQuando.description, /DD\/MM\/AAAA HH:MM/);
   });
 
   test('oferece as quatro opções de menção da seção 9.3', async () => {

@@ -50,7 +50,7 @@ export function montarModal() {
       }),
       campoDeTexto({
         rotulo: 'Data e hora (opcional)', id: 'quando', estilo: CURTO, obrigatorio: false, maximo: 20,
-        descricao: 'Formato DD/MM/AAAA HH:MM, horário de Brasília.',
+        descricao: 'Formato DD/MM/AAAA HH:MM. A hora é lida como horário de Brasília.',
         exemplo: '15/10/2026 19:00',
       }),
     ],
