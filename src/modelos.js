@@ -36,8 +36,9 @@ export const MODELOS = {
         obrigatorio: false, maximo: 500, exemplo: 'https://',
       },
     ],
-    // Ordem do conteúdo dentro do container.
-    ordemNoCard: ['quando', 'onde'],
+    // Ordem do conteúdo dentro do container, que também define os ids fixos:
+    // o primeiro campo é o id 10, o segundo é o 11, e a leitura segue a mesma ordem.
+    ordemNoCard: ['onde', 'quando'],
   },
 
   parceria: {
