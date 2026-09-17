@@ -7,6 +7,7 @@
 // Atenção: o PUT é uma sobrescrita em bloco. Ele substitui TODOS os comandos
 // deste app neste servidor, então esta lista precisa estar sempre completa.
 
+import { MODELOS } from '../src/modelos.js';
 import { carregarAmbiente, chamarApi, exigir } from './comum.js';
 
 // Tipos da API, para o código não ficar cheio de número solto.
@@ -42,6 +43,13 @@ const COMANDOS = [
     description: 'Publicar um anúncio no canal de avisos',
     type: CHAT_INPUT,
     default_member_permissions: SO_ADMIN,
+    // Um subcomando por modelo pronto. A lista vem do config dos modelos,
+    // para não existirem duas verdades sobre quais modelos existem.
+    options: Object.values(MODELOS).map((modelo) => ({
+      type: SUBCOMANDO,
+      name: modelo.valor,
+      description: modelo.descricaoDoComando,
+    })),
   },
 ];
 

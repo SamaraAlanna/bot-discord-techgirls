@@ -35,6 +35,18 @@ export function lerDataBrasilia(texto) {
 }
 
 /**
+ * Volta do unix para "DD/MM/AAAA HH:MM" em Brasília.
+ * Serve para reabrir o formulário com a data do jeito que ela foi digitada.
+ */
+export function formatarBrasilia(unix) {
+  const emBrasilia = new Date((unix - HORAS_ATRAS_DE_UTC * 3600) * 1000);
+  const doisDigitos = (numero) => String(numero).padStart(2, '0');
+
+  const data = `${doisDigitos(emBrasilia.getUTCDate())}/${doisDigitos(emBrasilia.getUTCMonth() + 1)}/${emBrasilia.getUTCFullYear()}`;
+  return `${data} ${doisDigitos(emBrasilia.getUTCHours())}:${doisDigitos(emBrasilia.getUTCMinutes())}`;
+}
+
+/**
  * Texto do campo "Quando": só o timestamp nativo, que cada pessoa vê no próprio fuso.
  * A data digitada é lida como horário de Brasília, e quem avisa disso é a descrição
  * do campo no formulário (seção 8.3 do CLAUDE.md).

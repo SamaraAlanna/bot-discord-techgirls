@@ -57,5 +57,6 @@ export async function chamarApi(metodo, caminho, { token, corpo } = {}) {
   if (!resposta.ok) {
     throw new Error(`${metodo} ${caminho} devolveu ${resposta.status}. Resposta: ${texto.slice(0, 600)}`);
   }
+  // DELETE devolve 204 sem corpo.
   return texto ? JSON.parse(texto) : null;
 }

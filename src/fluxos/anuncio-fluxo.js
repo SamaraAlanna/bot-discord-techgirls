@@ -1,200 +1,295 @@
-// Fluxo do /anuncio: envio do modal, escolha de menção e reação, publicar e cancelar.
+// Fluxo do /anuncio em Components V2: formulário, pré-visualização, publicação.
 
-import { anexosParaManter, baixarImagens, validarImagensDoModal } from '../anexos.js';
+import { anexosParaManter, baixarImagens, nomesDosAnexos, validarImagensDoModal } from '../anexos.js';
 import { lerAutora } from '../autora.js';
+import { lerCamposDoModal } from '../componentes/comum.js';
 import {
-  ID_CAMPO_IMAGENS,
-  ID_CANCELAR,
-  ID_MENU_MENCAO,
-  ID_MENU_REACAO,
-  ID_PUBLICAR,
+  ACAO,
+  CAMPO_IMAGENS,
+  IDS,
   emojiDaReacao,
-  lerCamposDoModal,
-  lerEmbedPrevia,
+  lerAcao,
+  lerCartao,
   mencaoParaPublicar,
-  montarComponentes,
-  montarEmbedPrevia,
-  montarEmbedPublicado,
+  montarCartao,
+  montarErro,
+  montarModalImagens,
+  montarModalTexto,
   textoDaPrevia,
+  valoresParaOModal,
 } from '../componentes/anuncio-componentes.js';
+import { FLAG_V2, texto } from '../componentes/v2.js';
 import { lerDataBrasilia } from '../datas.js';
 import {
-  caminhoDeAcompanhamento,
-  concluirInteracao,
-  criarMensagem,
+  caminhoDaRespostaOriginal,
+  editarRespostaOriginal,
   enviarArquivos,
   linkDaMensagem,
   reagir,
 } from '../discord-api.js';
 import { registrarNoLog } from '../log.js';
-import { EFEMERA, TIPO_RESPOSTA, adiarAtualizacao, atualizarMensagem, json, mensagemEfemera } from '../respostas.js';
+import { EFEMERA, TIPO_RESPOSTA, json, mensagemEfemera, modal } from '../respostas.js';
+import { acharModelo, campoPorPapel } from '../modelos.js';
 import { validarLink } from '../validacao.js';
 
-// Envio do modal: valida e responde com a pré-visualização efêmera.
-export function tratarEnvioDoModal(interacao, env, ctx) {
-  const campos = lerCamposDoModal(interacao.data?.components);
+// Pré-visualização: efêmera e em Components V2.
+const FLAGS_PREVIA = EFEMERA | FLAG_V2;
 
-  const titulo = campos.titulo ?? '';
-  const texto = campos.texto ?? '';
-  if (!titulo || !texto) {
-    return mensagemEfemera('Título e texto são obrigatórios, use /anuncio de novo e preencha os dois.');
-  }
+const respostaV2 = (tipo, componentes, extras = {}) => json({
+  type: tipo,
+  data: {
+    flags: FLAGS_PREVIA,
+    components: componentes,
+    allowed_mentions: { parse: [] },
+    ...extras,
+  },
+});
 
-  const resultadoLink = validarLink(campos.link);
-  if (resultadoLink.erro) return mensagemEfemera(resultadoLink.erro);
+// Pré-visualização inteira: a linha de apoio em cima e o card com os controles.
+const previa = (modelo, estado) => [
+  texto(textoDaPrevia(estado.escolha), IDS.APOIO),
+  ...montarCartao({ modelo, controles: true, ...estado }),
+];
 
-  let unix = null;
-  if (campos.quando) {
-    const resultadoData = lerDataBrasilia(campos.quando);
-    if (resultadoData.erro) return mensagemEfemera(resultadoData.erro);
-    unix = resultadoData.unix;
-  }
-
-  // Tipo, tamanho e quantidade vêm no payload, então dá para recusar antes de baixar nada.
-  const resultadoImagens = validarImagensDoModal(interacao, campos[ID_CAMPO_IMAGENS]);
-  if (resultadoImagens.erro) return mensagemEfemera(resultadoImagens.erro);
-
-  const dados = {
-    titulo,
-    texto,
-    link: resultadoLink.link,
-    unix,
-    // Sem escolha de menção ainda: o botão Publicar nasce desabilitado.
-    escolha: null,
-    autora: lerAutora(interacao),
-  };
-
-  if (!resultadoImagens.imagens.length) {
-    return json({
-      type: TIPO_RESPOSTA.MENSAGEM,
-      data: {
-        content: textoDaPrevia(null),
-        embeds: [montarEmbedPrevia(dados)],
-        components: montarComponentes({}),
-        flags: EFEMERA,
-        allowed_mentions: { parse: [] },
-      },
-    });
-  }
-
-  // Com imagens é preciso baixar os arquivos, o que não cabe nos 3 segundos.
-  // A pré-visualização vai como mensagem de acompanhamento, em multipart.
-  ctx.waitUntil(enviarPreviaComImagens(interacao, dados, resultadoImagens.imagens));
-  return json({ type: TIPO_RESPOSTA.MENSAGEM_ADIADA, data: { flags: EFEMERA } });
-}
-
-async function enviarPreviaComImagens(interacao, dados, imagens) {
-  const caminho = caminhoDeAcompanhamento(interacao.application_id, interacao.token);
-
+/**
+ * Atualiza a pré-visualização pelo endpoint de edição da resposta original.
+ * Mensagem V2 é editada por aqui, não pelo callback da interação (seção 12), e é
+ * daqui que sai o motivo quando o Discord recusa: o callback não conta nada.
+ */
+async function atualizarPrevia(interacao, componentes, extras = {}) {
   try {
-    const arquivos = await baixarImagens(imagens);
-
-    await enviarArquivos(caminho, {
-      payload: {
-        content: textoDaPrevia(null),
-        embeds: [montarEmbedPrevia(dados)],
-        components: montarComponentes({}),
-        flags: EFEMERA,
-        allowed_mentions: { parse: [] },
-        attachments: arquivos.map((arquivo, indice) => ({ id: indice, filename: arquivo.nome })),
-      },
-      arquivos,
+    await editarRespostaOriginal(interacao.application_id, interacao.token, {
+      flags: FLAGS_PREVIA,
+      components: componentes,
+      allowed_mentions: { parse: [] },
+      ...extras,
     });
   } catch (erro) {
-    console.error('Falha ao preparar a pré-visualização com imagens:', erro);
-    await concluirInteracao(interacao, 'Não consegui carregar as imagens. Use /anuncio de novo.');
+    console.error('Falha ao atualizar a pré-visualização:', erro);
+    await concluirV2(interacao, 'Algo quebrou aqui do meu lado. Use /anuncio de novo.');
+  }
+}
+
+/**
+ * Fecha a interação trocando o card por uma frase.
+ * Numa mensagem V2 não existe `content`: a frase também é componente.
+ */
+async function concluirV2(interacao, frase) {
+  try {
+    await editarRespostaOriginal(interacao.application_id, interacao.token, {
+      components: [texto(frase, IDS.FRASE)],
+      attachments: [],
+      allowed_mentions: { parse: [] },
+    });
+  } catch (erro) {
+    console.error('Falha ao fechar a pré-visualização:', erro);
+  }
+}
+
+// Envio de qualquer um dos formulários.
+export function tratarEnvioDoModal(interacao, env, ctx) {
+  const { acao, modelo: nome } = lerAcao(interacao.data?.custom_id);
+  const modelo = acharModelo(nome);
+  if (!modelo) return mensagemEfemera('Esse formulário é de uma versão antiga do bot, use /anuncio de novo.');
+
+  if (acao === ACAO.MODAL_IMAGENS) return tratarEnvioDeImagens(interacao, ctx, modelo);
+  return tratarEnvioDeTexto(interacao, modelo, ctx);
+}
+
+function tratarEnvioDeTexto(interacao, modelo, ctx) {
+  const campos = lerCamposDoModal(interacao.data?.components);
+  const autora = lerAutora(interacao);
+  const anterior = interacao.message ? lerCartao(modelo, interacao.message.components) : null;
+
+  const valores = {};
+  for (const campo of modelo.campos) valores[campo.id] = campos[campo.id] ?? '';
+
+  const faltando = modelo.campos.find((campo) => campo.obrigatorio && !valores[campo.id]);
+  if (faltando) {
+    return respostaV2(TIPO_RESPOSTA.MENSAGEM, montarErro({
+      modelo, autora, valores,
+      frase: `Falta preencher ${faltando.rotulo.toLowerCase()}, é um campo obrigatório.`,
+    }));
+  }
+
+  const campoDeLink = campoPorPapel(modelo, 'link');
+  if (campoDeLink) {
+    const resultado = validarLink(valores[campoDeLink.id], { obrigatorio: campoDeLink.obrigatorio });
+    if (resultado.erro) {
+      return respostaV2(TIPO_RESPOSTA.MENSAGEM, montarErro({ modelo, autora, valores, frase: resultado.erro }));
+    }
+    valores[campoDeLink.id] = resultado.link ?? '';
+  }
+
+  const campoDeData = campoPorPapel(modelo, 'data');
+  if (campoDeData && valores[campoDeData.id]) {
+    const resultado = lerDataBrasilia(valores[campoDeData.id]);
+    if (resultado.erro) {
+      return respostaV2(TIPO_RESPOSTA.MENSAGEM, montarErro({ modelo, autora, valores, frase: resultado.erro }));
+    }
+    // No card a data vira timestamp, e é como unix que ela fica guardada.
+    valores[campoDeData.id] = String(resultado.unix);
+  }
+
+  const componentes = previa(modelo, {
+    valores,
+    autora,
+    // Editar texto nunca apaga imagem nem desfaz as escolhas dos menus.
+    // Os nomes vêm dos anexos da mensagem, na ordem em que estão nela.
+    imagens: nomesDosAnexos(interacao.message),
+    escolha: anterior?.escolha ?? null,
+    reacao: anterior?.reacao,
+  });
+
+  if (!interacao.message) {
+    return respostaV2(TIPO_RESPOSTA.MENSAGEM, componentes);
+  }
+
+  // Edição de mensagem V2 também passa pelo endpoint de edição.
+  ctx.waitUntil(atualizarPrevia(interacao, componentes, { attachments: anexosParaManter(interacao.message) }));
+  return json({ type: TIPO_RESPOSTA.ATUALIZACAO_ADIADA });
+}
+
+// Envio do formulário de imagens: o que veio substitui tudo que havia antes.
+function tratarEnvioDeImagens(interacao, ctx, modelo) {
+  const campos = lerCamposDoModal(interacao.data?.components);
+  const atual = lerCartao(modelo, interacao.message?.components ?? []);
+
+  const novas = validarImagensDoModal(interacao, campos[CAMPO_IMAGENS]);
+  if (novas.erro) return mensagemEfemera(novas.erro);
+
+  // Sem arquivo nenhum: o anúncio fica sem imagens, e isso não precisa de rede.
+  if (!novas.imagens.length) {
+    if (!nomesDosAnexos(interacao.message).length) return mensagemEfemera('Nada mudou nas imagens.');
+
+    ctx.waitUntil(atualizarPrevia(interacao, previa(modelo, { ...atual, imagens: [] }), { attachments: [] }));
+    return json({ type: TIPO_RESPOSTA.ATUALIZACAO_ADIADA });
+  }
+
+  ctx.waitUntil(trocarImagens(interacao, modelo, atual, novas.imagens));
+  return json({ type: TIPO_RESPOSTA.ATUALIZACAO_ADIADA });
+}
+
+async function trocarImagens(interacao, modelo, atual, novas) {
+  const caminho = caminhoDaRespostaOriginal(interacao.application_id, interacao.token);
+
+  try {
+    const arquivos = await baixarImagens(novas);
+
+    await enviarArquivos(caminho, {
+      metodo: 'PATCH',
+      arquivos,
+      payload: {
+        flags: FLAGS_PREVIA,
+        // Texto e escolhas continuam como estavam: mexer em imagem não mexe no resto.
+        components: previa(modelo, { ...atual, imagens: arquivos.map((arquivo) => arquivo.nome) }),
+        // Só os arquivos novos entram na lista: os antigos saem da mensagem.
+        attachments: arquivos.map((arquivo, indice) => ({ id: indice, filename: arquivo.nome })),
+        allowed_mentions: { parse: [] },
+      },
+    });
+  } catch (erro) {
+    console.error('Falha ao trocar as imagens:', erro);
+    await concluirV2(interacao, 'Não consegui carregar as imagens. Use /anuncio de novo.');
   }
 }
 
 // Menus e botões da pré-visualização.
 export function tratarComponente(interacao, env, ctx) {
-  const acao = interacao.data?.custom_id;
+  const { acao, modelo: nome } = lerAcao(interacao.data?.custom_id);
+  const modelo = acharModelo(nome);
+  if (!modelo) return mensagemEfemera('Essa tela é de uma versão antiga do bot, use /anuncio de novo.');
 
-  if (acao === ID_CANCELAR) {
-    return atualizarMensagem({ content: 'Publicação cancelada.', embeds: [], components: [], attachments: [] });
+  const componentes = interacao.message?.components ?? [];
+
+  if (acao === ACAO.CANCELAR) {
+    ctx.waitUntil(atualizarPrevia(interacao, [texto('Publicação cancelada.', IDS.FRASE)], { attachments: [] }));
+    return json({ type: TIPO_RESPOSTA.ATUALIZACAO_ADIADA });
   }
 
-  const embed = interacao.message?.embeds?.[0];
-  if (!embed) {
-    // A pré-visualização é o estado inteiro. Sem ela, não dá para publicar nada.
-    return mensagemEfemera('Não consegui ler a pré-visualização, use /anuncio de novo.');
+  // O modal de imagens não depende do estado: responde direto, sem ler nada e sem rede.
+  if (acao === ACAO.EDITAR_IMAGENS) {
+    return modal(montarModalImagens(modelo));
   }
 
-  if (acao === ID_MENU_MENCAO || acao === ID_MENU_REACAO) {
-    const dados = lerEmbedPrevia(embed);
+  const atual = lerCartao(modelo, componentes);
+
+  if (acao === ACAO.EDITAR_TEXTO || acao === ACAO.CORRIGIR) {
+    return modal(montarModalTexto(modelo, valoresParaOModal(modelo, atual.valores)));
+  }
+
+  if (acao === ACAO.MENCAO || acao === ACAO.REACAO) {
     const valor = interacao.data?.values?.[0];
-    const atualizados = acao === ID_MENU_MENCAO
-      ? { ...dados, escolha: valor }
-      : { ...dados, reacao: valor };
+    const escolha = acao === ACAO.MENCAO ? valor : atual.escolha;
+    const reacao = acao === ACAO.REACAO ? valor : atual.reacao;
 
-    return atualizarMensagem({
-      // O conteúdo precisa ir junto: o que não é enviado no update fica como estava.
-      content: textoDaPrevia(atualizados.escolha),
-      // A autora é relida da interação a cada passo, nunca do card.
-      embeds: [montarEmbedPrevia({ ...atualizados, autora: lerAutora(interacao) })],
-      components: montarComponentes({ escolha: atualizados.escolha, reacao: atualizados.reacao }),
-      // Sem repetir esta lista, a API v10 apaga as imagens já anexadas.
-      attachments: anexosParaManter(interacao.message),
-      allowed_mentions: { parse: [] },
-    });
+    ctx.waitUntil(atualizarPrevia(
+      interacao,
+      previa(modelo, {
+        valores: atual.valores,
+        autora: atual.autora,
+        // A galeria é remontada a partir dos anexos que a mensagem já tem.
+        imagens: nomesDosAnexos(interacao.message),
+        escolha,
+        reacao,
+      }),
+      { attachments: anexosParaManter(interacao.message) },
+    ));
+    return json({ type: TIPO_RESPOSTA.ATUALIZACAO_ADIADA });
   }
 
-  if (acao === ID_PUBLICAR) {
-    const dados = lerEmbedPrevia(embed);
-    if (!dados.escolha) {
-      return mensagemEfemera('Escolha no menu quem deve ser avisada antes de publicar.');
-    }
+  if (acao === ACAO.PUBLICAR) {
+    if (!atual.escolha) return mensagemEfemera('Escolha no menu quem deve ser avisada antes de publicar.');
 
-    // Publicar chama a API, o que não cabe nos 3 segundos da primeira resposta.
-    ctx.waitUntil(publicar(interacao, env, { ...dados, autora: lerAutora(interacao) }));
-    return adiarAtualizacao();
+    ctx.waitUntil(publicar(interacao, env, modelo, atual));
+    return json({ type: TIPO_RESPOSTA.ATUALIZACAO_ADIADA });
   }
 
   return mensagemEfemera('Esse botão não existe mais, use /anuncio de novo.');
 }
 
-// Roda depois da resposta adiada: publica, reage, registra no log e fecha a interação.
-async function publicar(interacao, env, dados) {
+// Roda depois da resposta adiada: publica, reage, registra no log e fecha.
+async function publicar(interacao, env, modelo, atual) {
   const adminId = interacao.member?.user?.id ?? interacao.user?.id;
-  const mencao = mencaoParaPublicar(dados.escolha);
   const anexos = interacao.message?.attachments ?? [];
 
   let mensagem;
   try {
-    // As imagens vêm dos anexos da própria pré-visualização, que são mídia efêmera.
-    // Baixar antes de publicar garante que ou vai tudo, ou não vai nada.
+    // As imagens vêm dos anexos da interação do clique, que são mídia efêmera.
     const arquivos = anexos.length ? await baixarImagens(anexos) : [];
 
-    const payload = {
-      // A menção precisa estar no conteúdo: menção dentro de embed não notifica.
-      ...(mencao.content ? { content: mencao.content } : {}),
-      embeds: [montarEmbedPublicado(dados)],
-      allowed_mentions: mencao.allowed_mentions,
-    };
-
-    mensagem = arquivos.length
-      ? await enviarArquivos(`/channels/${env.CANAL_ANUNCIOS_ID}/messages`, {
-        token: env.DISCORD_TOKEN,
-        payload: {
-          ...payload,
-          attachments: arquivos.map((arquivo, indice) => ({ id: indice, filename: arquivo.nome })),
-        },
-        arquivos,
-      })
-      : await criarMensagem(env.CANAL_ANUNCIOS_ID, payload, env.DISCORD_TOKEN);
+    mensagem = await enviarArquivos(`/channels/${env.CANAL_ANUNCIOS_ID}/messages`, {
+      token: env.DISCORD_TOKEN,
+      arquivos,
+      payload: {
+        flags: FLAG_V2,
+        components: montarCartao({
+          modelo,
+          valores: atual.valores,
+          autora: atual.autora,
+          imagens: arquivos.map((arquivo) => arquivo.nome),
+          escolha: atual.escolha,
+          controles: false,
+        }),
+        allowed_mentions: mencaoParaPublicar(atual.escolha),
+        ...(arquivos.length
+          ? { attachments: arquivos.map((arquivo, indice) => ({ id: indice, filename: arquivo.nome })) }
+          : {}),
+      },
+    });
   } catch (erro) {
     console.error('Falha ao publicar o anúncio:', erro);
-    await concluirInteracao(interacao, 'Não consegui publicar o anúncio, tente de novo em instantes.');
+    await concluirV2(interacao, 'Não consegui publicar o anúncio, tente de novo em instantes.');
     return;
   }
 
   // Daqui para baixo o anúncio já está no ar: nada pode desfazer isso.
-  await deixarReacao(env, mensagem.id, dados.reacao);
+  await deixarReacao(env, mensagem.id, atual.reacao);
 
   const link = linkDaMensagem(env.GUILD_ID, env.CANAL_ANUNCIOS_ID, mensagem.id);
   await registrarNoLog(env, { acao: 'Anúncio publicado', adminId, link });
 
-  await concluirInteracao(interacao, `Anúncio publicado: ${link}`);
+  await concluirV2(interacao, `Anúncio publicado: ${link}`);
 }
 
 // Reagir é enfeite: falhar aqui não pode manchar uma publicação que deu certo.

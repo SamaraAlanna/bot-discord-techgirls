@@ -3,6 +3,15 @@
 const API = 'https://discord.com/api/v10';
 const USER_AGENT = 'DiscordBot (https://github.com/tech-girls/bot-tech-girls, 0.1.0)';
 
+/**
+ * Esconde o token da interação antes de qualquer log.
+ * Ele vai no caminho das rotas de webhook e vale como senha temporária:
+ * quem o tiver pode responder no lugar do bot enquanto a interação viver.
+ */
+export function esconderToken(caminho) {
+  return String(caminho).replace(/(\/webhooks\/[^/]+\/)[^/?]+/, '$1***');
+}
+
 // `token` só é necessário nas rotas do bot. As rotas de webhook da interação
 // se autenticam pelo token da própria interação, que já vai no caminho.
 async function chamarDiscord(metodo, caminho, { token, corpo } = {}) {
@@ -19,7 +28,7 @@ async function chamarDiscord(metodo, caminho, { token, corpo } = {}) {
   const texto = await resposta.text();
   if (!resposta.ok) {
     // O corpo do erro é onde o Discord diz qual campo recusou. Vai para o log do Worker.
-    throw new Error(`${metodo} ${caminho} devolveu ${resposta.status}: ${texto.slice(0, 600)}`);
+    throw new Error(`${metodo} ${esconderToken(caminho)} devolveu ${resposta.status}: ${texto}`);
   }
   return texto ? JSON.parse(texto) : null;
 }
@@ -43,7 +52,7 @@ export function editarRespostaOriginal(applicationId, tokenDaInteracao, corpo) {
  * O corpo vai como `payload_json` mais `files[n]`, que é o formato da doc de uploads.
  * Não definimos content-type na mão: o fetch monta o boundary sozinho.
  */
-export async function enviarArquivos(caminho, { token, payload, arquivos = [] }) {
+export async function enviarArquivos(caminho, { token, payload, arquivos = [], metodo = 'POST' }) {
   const formulario = new FormData();
   formulario.append('payload_json', JSON.stringify(payload));
 
@@ -52,7 +61,7 @@ export async function enviarArquivos(caminho, { token, payload, arquivos = [] })
   });
 
   const resposta = await fetch(API + caminho, {
-    method: 'POST',
+    method: metodo,
     headers: {
       'user-agent': USER_AGENT,
       ...(token ? { authorization: `Bot ${token}` } : {}),
@@ -62,14 +71,14 @@ export async function enviarArquivos(caminho, { token, payload, arquivos = [] })
 
   const texto = await resposta.text();
   if (!resposta.ok) {
-    throw new Error(`POST ${caminho} devolveu ${resposta.status}: ${texto.slice(0, 600)}`);
+    throw new Error(`${metodo} ${esconderToken(caminho)} devolveu ${resposta.status}: ${texto}`);
   }
   return texto ? JSON.parse(texto) : null;
 }
 
-// Mensagem de acompanhamento de uma interação, usada depois de uma resposta adiada.
-export function caminhoDeAcompanhamento(applicationId, tokenDaInteracao) {
-  return `/webhooks/${applicationId}/${tokenDaInteracao}`;
+// A resposta original da interação, que é a mensagem a ser editada depois do adiamento.
+export function caminhoDaRespostaOriginal(applicationId, tokenDaInteracao) {
+  return `/webhooks/${applicationId}/${tokenDaInteracao}/messages/@original`;
 }
 
 /**

@@ -1,191 +1,295 @@
-// Montagem do modal, do card e dos componentes do fluxo de anúncio.
-// A pré-visualização é também o lugar onde o estado mora (seção 7 do CLAUDE.md):
-// o que está no embed é o que vai ser publicado.
+// Montagem do /anuncio em Components V2: formulários, card e controles.
+//
+// O estado mora nos próprios componentes da pré-visualização (seção 7 do CLAUDE.md).
+// Para não depender do texto visível, cada peça leva um `id` numérico fixo, definido
+// aqui, e a leitura procura por esse id. O modelo escolhido viaja no custom_id.
 
-import { CORES, MENCOES, MENCOES_AMPLAS, REACAO_PADRAO, REACOES, RODAPE } from '../config.js';
-import {
-  CURTO,
-  PARAGRAFO,
-  autoriaDoEmbed,
-  campoDeTexto,
-  campoDeUpload,
-  lerCamposDoModal,
-  linhaDeBotoes,
-  menuDeSelecao,
-  opcoesDaLista,
-} from './comum.js';
 import { MAXIMO_DE_IMAGENS, MAXIMO_EM_MB } from '../anexos.js';
-import { lerUnixDoTexto, textoDeQuando } from '../datas.js';
+import { CORES, MENCOES, MENCOES_AMPLAS, REACAO_PADRAO, REACOES } from '../config.js';
+import { formatarBrasilia, lerUnixDoTexto, textoDeQuando } from '../datas.js';
+import { campoPorPapel, camposDoCard } from '../modelos.js';
+import { campoDeTexto, campoDeUpload, menuDeSelecao, opcoesDaLista } from './comum.js';
+import {
+  BOTAO_VERDE,
+  BOTAO_VERMELHO,
+  botao,
+  botaoDeLink,
+  container,
+  galeria,
+  linha,
+  porId,
+  texto,
+} from './v2.js';
 
-export { lerCamposDoModal };
+// Ações. O terceiro pedaço do custom_id é sempre o modelo.
+export const ACAO = {
+  MODAL_TEXTO: 'texto',
+  MODAL_IMAGENS: 'imagens',
+  EDITAR_TEXTO: 'editar-texto',
+  EDITAR_IMAGENS: 'editar-imagens',
+  MENCAO: 'mencao',
+  REACAO: 'reacao',
+  PUBLICAR: 'publicar',
+  CANCELAR: 'cancelar',
+  CORRIGIR: 'corrigir',
+};
 
-export const ID_MODAL = 'anuncio:modal';
-export const ID_MENU_MENCAO = 'anuncio:mencao';
-export const ID_MENU_REACAO = 'anuncio:reacao';
-export const ID_CAMPO_IMAGENS = 'imagens';
-export const ID_PUBLICAR = 'anuncio:publicar';
-export const ID_CANCELAR = 'anuncio:cancelar';
+export const idDaAcao = (acao, modelo) => `anuncio:${acao}:${modelo}`;
 
-// Nomes dos campos do embed. São também as chaves do estado, então mudar um
-// nome aqui invalida as pré-visualizações que estiverem abertas.
-const CAMPO_LINK = 'Link';
-const CAMPO_QUANDO = 'Quando';
-const CAMPO_MENCAO = 'Mencionar';
-const CAMPO_REACAO = 'Reação';
+export function lerAcao(customId) {
+  const [, acao, modelo] = String(customId ?? '').split(':');
+  return { acao, modelo };
+}
 
-const SEM_ESCOLHA = 'Ainda não escolhido';
+// Ids numéricos dos componentes do card, fixos por posição.
+// Fora do container vêm menção, título e descrição; dentro, os dados do modelo,
+// a galeria, o botão e a autora no fim.
+export const IDS = {
+  MENCAO: 1,
+  TITULO: 2,
+  DESCRICAO: 3,
+  CONTAINER: 4,
+  GALERIA: 5,
+  BOTAO_LINK: 6,
+  AUTORA: 7,
+  APOIO: 8,
+  FRASE: 9,
+  // Os campos do modelo começam no 10, na ordem de `ordemNoCard`.
+  campo: (posicao) => 10 + posicao,
+};
 
-// O modal aceita no máximo 5 componentes de topo: 4 campos de texto e o upload.
-export function montarModal() {
+// Campo do modal de imagens.
+export const CAMPO_IMAGENS = 'imagens';
+
+/** Formulário do modelo, já preenchido quando é edição. */
+export function montarModalTexto(modelo, valores = {}) {
   return {
-    custom_id: ID_MODAL,
-    title: 'Novo anúncio',
+    custom_id: idDaAcao(ACAO.MODAL_TEXTO, modelo.valor),
+    title: modelo.tituloDoModal,
+    components: modelo.campos.map((campo) => campoDeTexto({
+      rotulo: campo.rotulo,
+      id: campo.id,
+      estilo: campo.estilo,
+      obrigatorio: campo.obrigatorio,
+      maximo: campo.maximo,
+      ...(campo.descricao ? { descricao: campo.descricao } : {}),
+      ...(campo.exemplo ? { exemplo: campo.exemplo } : {}),
+      ...(valores[campo.id] ? { valor: valores[campo.id] } : {}),
+    })),
+  };
+}
+
+/**
+ * Formulário de imagens: um campo só, o upload.
+ * O que for enviado substitui todas as imagens do anúncio, e enviar vazio tira todas.
+ * Nada de menu de remoção: ele era o único componente novo neste modal quando o
+ * Discord passou a recusar a tela (seção 12).
+ */
+export function montarModalImagens(modelo) {
+  return {
+    custom_id: idDaAcao(ACAO.MODAL_IMAGENS, modelo.valor),
+    title: 'Imagens do anúncio',
     components: [
-      campoDeTexto({
-        rotulo: 'Título', id: 'titulo', estilo: CURTO, obrigatorio: true, maximo: 200,
-        exemplo: 'Mentoria de carreira em abril',
-      }),
-      campoDeTexto({
-        rotulo: 'Texto', id: 'texto', estilo: PARAGRAFO, obrigatorio: true, maximo: 3000,
-        descricao: 'O corpo do anúncio, do jeito que as membras vão ler.',
-      }),
-      campoDeTexto({
-        rotulo: 'Link (opcional)', id: 'link', estilo: CURTO, obrigatorio: false, maximo: 500,
-        exemplo: 'https://',
-      }),
-      campoDeTexto({
-        rotulo: 'Data e hora (opcional)', id: 'quando', estilo: CURTO, obrigatorio: false, maximo: 20,
-        descricao: 'Formato DD/MM/AAAA HH:MM. A hora é lida como horário de Brasília.',
-        exemplo: '15/10/2026 19:00',
-      }),
       campoDeUpload({
-        rotulo: 'Imagens', id: ID_CAMPO_IMAGENS, obrigatorio: false, minimo: 0,
+        rotulo: 'Imagens',
+        id: CAMPO_IMAGENS,
+        obrigatorio: false,
+        minimo: 0,
         maximo: MAXIMO_DE_IMAGENS,
-        descricao: `Opcional. Até ${MAXIMO_DE_IMAGENS} imagens de até ${MAXIMO_EM_MB} MB.`,
+        descricao: `Opcional. Até ${MAXIMO_DE_IMAGENS} imagens de até ${MAXIMO_EM_MB} MB. As novas substituem as atuais.`,
       }),
     ],
   };
 }
 
-// Texto que representa cada escolha dentro do card. É daqui que a escolha é relida
-// na hora de publicar. Menção dentro de embed não notifica ninguém.
-function textoDaEscolha(escolha) {
-  const opcao = MENCOES.find((item) => item.valor === escolha);
-  if (!opcao) return SEM_ESCOLHA;
-  if (opcao.id) return `<@&${opcao.id}>`;
-  return opcao.rotulo;
+// "📅 **Quando:** " na frente do valor. É por esse prefixo que o valor é relido.
+const prefixoDoCampo = (campo) => `${campo.marca} **${campo.nome}:** `;
+
+// Uma linha de conteúdo do card. Campo com marca ganha o rótulo na frente.
+function linhaDoCampo(campo, valor, posicao) {
+  const id = IDS.campo(posicao);
+
+  if (campo.formato === 'cupom') {
+    return texto(`🎟️ **Use o código**\n\`\`\`\n${valor}\n\`\`\``, id);
+  }
+  if (campo.papel === 'data') {
+    // No card de erro a data pode estar ainda como a admin digitou, porque a
+    // validação parou antes. Nesse caso ela aparece como texto mesmo.
+    const conteudo = /^[0-9]+$/.test(valor) ? textoDeQuando(Number(valor)) : valor;
+    return texto(`${prefixoDoCampo(campo)}${conteudo}`, id);
+  }
+  if (campo.marca) {
+    return texto(`${prefixoDoCampo(campo)}${valor}`, id);
+  }
+  return texto(valor, id);
 }
 
-function escolhaDoTexto(texto) {
-  if (!texto || texto === SEM_ESCOLHA) return null;
+/**
+ * Card do anúncio. `controles` liga os menus e botões da pré-visualização.
+ * A menção fica num texto acima do container: numa mensagem V2 não existe `content`,
+ * então é esse texto que notifica.
+ */
+export function montarCartao({ modelo, valores, imagens = [], autora, escolha, reacao, controles = true }) {
+  const dentro = camposDoCard(modelo)
+    .map((campo, posicao) => (valores[campo.id] ? linhaDoCampo(campo, valores[campo.id], posicao) : null))
+    .filter(Boolean);
 
-  const porCargo = texto.match(/<@&(\d+)>/)?.[1];
-  if (porCargo) return MENCOES.find((item) => item.id === porCargo)?.valor ?? null;
+  if (imagens.length) dentro.push(galeria(imagens, IDS.GALERIA));
 
-  return MENCOES.find((item) => !item.id && item.rotulo === texto)?.valor ?? null;
-}
+  const campoDeLink = campoPorPapel(modelo, 'link');
+  // O botão vem logo depois do que veio antes, sem divisória nenhuma.
+  if (campoDeLink && valores[campoDeLink.id]) {
+    dentro.push(linha([botaoDeLink(modelo.rotuloDoBotao, valores[campoDeLink.id], IDS.BOTAO_LINK)]));
+  }
 
-// A reação é guardada no card pelo próprio rótulo, que já é o emoji.
-function rotuloDaReacao(reacao) {
-  return REACOES.find((item) => item.valor === (reacao ?? REACAO_PADRAO))?.rotulo ?? 'Nenhuma';
-}
+  // A assinatura fecha o container. Components V2 não tem alinhamento (seção 12),
+  // então ela fica à esquerda mesmo, só menor.
+  dentro.push(texto(`-# Autora: <@${autora?.id ?? '0'}>`, IDS.AUTORA));
 
-function reacaoDoRotulo(rotulo) {
-  return REACOES.find((item) => item.rotulo === rotulo)?.valor ?? REACAO_PADRAO;
-}
+  const cartao = [];
+  const mencao = MENCOES.find((item) => item.valor === escolha);
+  if (mencao && escolha !== 'ninguem') {
+    cartao.push(texto(mencao.id ? `<@&${mencao.id}>` : mencao.rotulo, IDS.MENCAO));
+  }
 
-// Emoji da escolha, ou null quando a admin escolheu Nenhuma.
-export function emojiDaReacao(reacao) {
-  return REACOES.find((item) => item.valor === reacao)?.caractere ?? null;
-}
+  // Fora do container: título e descrição, nesta ordem.
+  cartao.push(texto(`# ${valores.titulo}`, IDS.TITULO));
 
-// Card de pré-visualização. Guarda tudo que o botão Publicar precisa depois.
-export function montarEmbedPrevia({ titulo, texto, link, unix, escolha, reacao, autora }) {
-  const campos = [];
+  const campoDeDescricao = campoPorPapel(modelo, 'descricao');
+  if (campoDeDescricao && valores[campoDeDescricao.id]) {
+    cartao.push(texto(valores[campoDeDescricao.id], IDS.DESCRICAO));
+  }
 
-  if (link) campos.push({ name: CAMPO_LINK, value: link });
-  if (unix) campos.push({ name: CAMPO_QUANDO, value: textoDeQuando(unix) });
-  campos.push({ name: CAMPO_MENCAO, value: textoDaEscolha(escolha) });
-  campos.push({ name: CAMPO_REACAO, value: rotuloDaReacao(reacao) });
+  cartao.push(container(CORES.ANUNCIO, dentro, IDS.CONTAINER));
 
-  return {
-    color: CORES.ANUNCIO,
-    title: titulo,
-    description: texto,
-    fields: campos,
-    ...autoriaDoEmbed(autora),
-    footer: RODAPE,
-  };
-}
+  if (!controles) return cartao;
 
-// Caminho inverso: recupera o estado guardado no card.
-export function lerEmbedPrevia(embed) {
-  const valor = (nome) => embed.fields?.find((campo) => campo.name === nome)?.value ?? null;
-
-  return {
-    titulo: embed.title ?? '',
-    texto: embed.description ?? '',
-    link: valor(CAMPO_LINK),
-    unix: lerUnixDoTexto(valor(CAMPO_QUANDO)),
-    escolha: escolhaDoTexto(valor(CAMPO_MENCAO)),
-    reacao: reacaoDoRotulo(valor(CAMPO_REACAO)),
-  };
-}
-
-// Card que vai para o canal de avisos, sem o campo de controle "Mencionar".
-export function montarEmbedPublicado({ titulo, texto, link, unix, autora }) {
-  const campos = [];
-  if (link) campos.push({ name: CAMPO_LINK, value: link });
-  if (unix) campos.push({ name: CAMPO_QUANDO, value: textoDeQuando(unix) });
-
-  return {
-    color: CORES.ANUNCIO,
-    title: titulo,
-    description: texto,
-    ...(campos.length ? { fields: campos } : {}),
-    ...autoriaDoEmbed(autora),
-    footer: RODAPE,
-  };
-}
-
-// Menu de menção e botões. O Publicar só habilita depois de uma escolha explícita,
-// para ninguém publicar achando que avisou alguém, nem notificar o servidor sem querer.
-export function montarComponentes({ escolha, reacao = REACAO_PADRAO } = {}) {
   return [
+    ...cartao,
     menuDeSelecao({
-      id: ID_MENU_MENCAO,
+      id: idDaAcao(ACAO.MENCAO, modelo.valor),
       convite: 'Quem deve ser avisada?',
       opcoes: opcoesDaLista(MENCOES, escolha),
     }),
     menuDeSelecao({
-      id: ID_MENU_REACAO,
+      id: idDaAcao(ACAO.REACAO, modelo.valor),
       convite: 'Deixo alguma reação no anúncio?',
-      opcoes: opcoesDaLista(REACOES, reacao),
+      opcoes: opcoesDaLista(REACOES, reacao ?? REACAO_PADRAO),
     }),
-    // Só a menção trava o botão: a reação já tem padrão.
-    linhaDeBotoes({ idPublicar: ID_PUBLICAR, idCancelar: ID_CANCELAR, habilitado: Boolean(escolha) }),
+    linha([
+      botao({ id: idDaAcao(ACAO.EDITAR_TEXTO, modelo.valor), rotulo: 'Editar texto' }),
+      botao({ id: idDaAcao(ACAO.EDITAR_IMAGENS, modelo.valor), rotulo: 'Editar imagens' }),
+      botao({
+        id: idDaAcao(ACAO.PUBLICAR, modelo.valor),
+        rotulo: 'Publicar',
+        estilo: BOTAO_VERDE,
+        desabilitado: !escolha,
+      }),
+      botao({ id: idDaAcao(ACAO.CANCELAR, modelo.valor), rotulo: 'Cancelar', estilo: BOTAO_VERMELHO }),
+    ]),
+  ];
+}
+
+/** Card de erro: a frase, o rascunho do jeito que ficaria e o botão Corrigir. */
+export function montarErro({ modelo, frase, valores, autora }) {
+  return [
+    texto(frase, IDS.FRASE),
+    ...montarCartao({ modelo, valores, autora, controles: false }),
+    linha([botao({ id: idDaAcao(ACAO.CORRIGIR, modelo.valor), rotulo: 'Corrigir', estilo: BOTAO_VERDE })]),
   ];
 }
 
 /**
- * Conteúdo e allowed_mentions da mensagem publicada.
- * O content carrega só a menção escolhida, e o allowed_mentions libera só ela:
- * as duas travas precisam concordar para ninguém ser notificado por engano.
+ * Relê o estado a partir dos componentes, pelos ids numéricos.
+ * O valor de cada campo vem sem o rótulo que o próprio código escreveu.
+ * As imagens não saem daqui: elas vêm dos anexos da mensagem (`nomesDosAnexos`),
+ * porque a galeria devolvida pelo Discord traz a URL do CDN, não o nome do arquivo.
  */
+export function lerCartao(modelo, componentes) {
+  const indice = porId(componentes, new Map());
+  const conteudoDe = (id) => indice.get(id)?.content ?? null;
+  // O rótulo é montado pelo próprio código, então tirar o prefixo devolve o valor.
+  const semPrefixo = (conteudo, campo) => String(conteudo ?? '').replace(prefixoDoCampo(campo), '');
+
+  const valores = {};
+  const titulo = conteudoDe(IDS.TITULO);
+  if (titulo !== null) valores.titulo = titulo.replace(/^# /, '');
+
+  const campoDeDescricao = campoPorPapel(modelo, 'descricao');
+  if (campoDeDescricao) valores[campoDeDescricao.id] = conteudoDe(IDS.DESCRICAO) ?? '';
+
+  camposDoCard(modelo).forEach((campo, posicao) => {
+    const conteudo = conteudoDe(IDS.campo(posicao));
+    if (conteudo === null) return;
+
+    if (campo.formato === 'cupom') {
+      valores[campo.id] = conteudo.replace(/^[^\n]*\n```\n?/, '').replace(/\n?```$/, '');
+      return;
+    }
+    if (campo.papel === 'data') {
+      const unix = lerUnixDoTexto(conteudo);
+      valores[campo.id] = unix ? String(unix) : semPrefixo(conteudo, campo);
+      return;
+    }
+    valores[campo.id] = campo.marca ? semPrefixo(conteudo, campo) : conteudo;
+  });
+
+  const campoDeLink = campoPorPapel(modelo, 'link');
+  if (campoDeLink) valores[campoDeLink.id] = indice.get(IDS.BOTAO_LINK)?.url ?? '';
+
+  return {
+    valores,
+    autora: lerAutora(indice),
+    escolha: escolhaDoMenu(componentes, ACAO.MENCAO, modelo.valor),
+    reacao: escolhaDoMenu(componentes, ACAO.REACAO, modelo.valor) ?? REACAO_PADRAO,
+  };
+}
+
+function lerAutora(indice) {
+  const conteudo = indice.get(IDS.AUTORA)?.content ?? '';
+  return { id: conteudo.match(/<@(\d+)>/)?.[1] ?? null };
+}
+
+// A escolha dos menus fica marcada como `default` na própria opção.
+function escolhaDoMenu(componentes, acao, modelo) {
+  const procurados = [];
+  const visitar = (lista) => {
+    for (const item of lista ?? []) {
+      if (item.custom_id === idDaAcao(acao, modelo)) procurados.push(item);
+      if (item.components) visitar(item.components);
+    }
+  };
+  visitar(componentes);
+
+  return procurados[0]?.options?.find((opcao) => opcao.default)?.value ?? null;
+}
+
+// Valores do card traduzidos de volta para o formulário.
+export function valoresParaOModal(modelo, valores) {
+  const preenchidos = { ...valores };
+  const campoDeData = campoPorPapel(modelo, 'data');
+
+  if (campoDeData && /^\d+$/.test(preenchidos[campoDeData.id] ?? '')) {
+    preenchidos[campoDeData.id] = formatarBrasilia(Number(preenchidos[campoDeData.id]));
+  }
+  return preenchidos;
+}
+
+/** allowed_mentions da publicação, liberando só a menção escolhida. */
 export function mencaoParaPublicar(escolha) {
   const opcao = MENCOES.find((item) => item.valor === escolha);
 
-  if (opcao?.id) {
-    return { content: `<@&${opcao.id}>`, allowed_mentions: { parse: [], roles: [opcao.id] } };
-  }
-  // O tipo "everyone" do parse cobre @everyone e @here, e o content tem só uma das duas.
-  if (escolha === 'everyone') return { content: '@everyone', allowed_mentions: { parse: ['everyone'] } };
-  if (escolha === 'here') return { content: '@here', allowed_mentions: { parse: ['everyone'] } };
-
-  return { content: null, allowed_mentions: { parse: [] } };
+  // "users" nunca entra no parse, então a menção da autora no card não notifica.
+  if (opcao?.id) return { parse: [], roles: [opcao.id] };
+  if (escolha === 'everyone' || escolha === 'here') return { parse: ['everyone'] };
+  return { parse: [] };
 }
 
-// Linha que acompanha a pré-visualização. Avisa quando a escolha alcança o servidor inteiro.
+export function emojiDaReacao(reacao) {
+  return REACOES.find((item) => item.valor === reacao)?.caractere ?? null;
+}
+
+// Linha de apoio acima do card, com o aviso das menções que alcançam o servidor.
 export function textoDaPrevia(escolha) {
   if (!MENCOES_AMPLAS.includes(escolha)) {
     return 'Confira como vai ficar e escolha quem deve ser avisada.';

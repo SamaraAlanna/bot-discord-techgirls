@@ -18,7 +18,7 @@ const BOTAO_VERMELHO = 4;
 
 // Um campo de texto do modal, embrulhado no Label (type 18).
 // O `label` do próprio campo de texto está deprecated, por isso ele vem do Label.
-export function campoDeTexto({ rotulo, descricao, id, estilo, obrigatorio, exemplo, maximo }) {
+export function campoDeTexto({ rotulo, descricao, id, estilo, obrigatorio, exemplo, maximo, valor }) {
   return {
     type: LABEL,
     label: rotulo,
@@ -30,6 +30,8 @@ export function campoDeTexto({ rotulo, descricao, id, estilo, obrigatorio, exemp
       required: obrigatorio,
       ...(exemplo ? { placeholder: exemplo } : {}),
       ...(maximo ? { max_length: maximo } : {}),
+      // `value` deixa o campo já preenchido, que é o que permite reabrir para editar.
+      ...(valor ? { value: valor } : {}),
     },
   };
 }

@@ -74,6 +74,15 @@ export async function baixarImagens(anexos) {
 }
 
 /**
+ * Nomes dos arquivos já anexados, na ordem em que estão na mensagem.
+ * É daqui que a galeria tira o `attachment://nome`: nunca da URL do componente,
+ * porque o Discord devolve a galeria já com o endereço do CDN resolvido.
+ */
+export function nomesDosAnexos(mensagem) {
+  return (mensagem?.attachments ?? []).map((anexo) => anexo.filename);
+}
+
+/**
  * Lista de anexos a manter numa edição de mensagem.
  * Na v10 da API, editar sem mandar `attachments` apaga os anexos existentes,
  * então toda atualização da pré-visualização precisa repetir esta lista.
