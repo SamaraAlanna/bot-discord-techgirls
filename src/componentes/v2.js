@@ -65,6 +65,19 @@ export const botaoDeLink = (rotulo, url, id) => ({
   url,
 });
 
+// Linha de dado do card: "📅 **Quando:** valor". O prefixo é montado aqui, e é
+// por ele que a leitura devolve o valor, sem depender de procurar no texto.
+export const prefixoDeDado = (marca, rotulo) => `${marca} **${rotulo}:** `;
+
+export const linhaDeDado = (marca, rotulo, valor, id) => texto(`${prefixoDeDado(marca, rotulo)}${valor}`, id);
+
+export const semPrefixo = (conteudo, marca, rotulo) => String(conteudo ?? '').replace(prefixoDeDado(marca, rotulo), '');
+
+// Assinatura de quem publicou, fechando o container.
+export const assinatura = (autoraId, id) => texto(`-# Autora: <@${autoraId ?? '0'}>`, id);
+
+export const lerIdDaAutora = (conteudo) => String(conteudo ?? '').match(/<@(\d+)>/)?.[1] ?? null;
+
 // Índice dos componentes por `id`, para reler o estado sem procurar por texto.
 export function porId(componentes, indice = new Map()) {
   for (const componente of componentes ?? []) {

@@ -2,7 +2,7 @@
 // IDs de canais não entram neste arquivo: vêm das vars do wrangler.toml, pelo env.
 // Os IDs de tags e cargos abaixo vieram de `npm run ids` (scripts/listar-ids.js).
 
-// Embeds recebem cor em inteiro decimal (seção 9.4 do CLAUDE.md).
+// Os cards recebem cor em inteiro decimal (seção 9.4 do CLAUDE.md).
 const cor = (hex) => parseInt(hex.slice(1), 16);
 
 export const CORES = {
@@ -10,9 +10,6 @@ export const CORES = {
   ANUNCIO: cor('#7341C0'), // roxo-500
   ENCERRADA: cor('#4A2A8C'), // roxo-700, também usado no log
 };
-
-// Rodapé dos embeds: texto, sem ícone.
-export const RODAPE = { text: 'Tech Girls' };
 
 // Tags do fórum de vagas. O código mapeia sempre por ID, nunca por nome:
 // renomear a tag no servidor não pode quebrar o bot.
@@ -76,8 +73,3 @@ export const REACOES = [
 
 // A reação já nasce escolhida, então ela não trava o botão Publicar.
 export const REACAO_PADRAO = 'nenhuma';
-
-// Busca por valor, do jeito que os menus devolvem a escolha.
-export function acharPorValor(lista, valor) {
-  return lista.find((item) => item.valor === valor) ?? null;
-}

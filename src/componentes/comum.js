@@ -88,25 +88,3 @@ export function opcoesDaLista(lista, escolha) {
     default: escolha === item.valor,
   }));
 }
-
-// Linha de Publicar e Cancelar. Publicar só habilita quando o fluxo está completo.
-export function linhaDeBotoes({ idPublicar, idCancelar, habilitado }) {
-  return {
-    type: ACTION_ROW,
-    components: [
-      { type: BOTAO, style: BOTAO_VERDE, custom_id: idPublicar, label: 'Publicar', disabled: !habilitado },
-      { type: BOTAO, style: BOTAO_VERMELHO, custom_id: idCancelar, label: 'Cancelar' },
-    ],
-  };
-}
-
-// Bloco author do embed. A autora vem da interação, não do card.
-export function autoriaDoEmbed(autora) {
-  if (!autora?.nome) return {};
-  return {
-    author: {
-      name: `Autora: ${autora.nome}`,
-      ...(autora.iconUrl ? { icon_url: autora.iconUrl } : {}),
-    },
-  };
-}

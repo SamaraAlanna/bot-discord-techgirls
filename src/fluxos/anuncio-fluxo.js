@@ -22,69 +22,21 @@ import { FLAG_V2, texto } from '../componentes/v2.js';
 import { lerDataBrasilia } from '../datas.js';
 import {
   caminhoDaRespostaOriginal,
-  editarRespostaOriginal,
   enviarArquivos,
   linkDaMensagem,
   reagir,
 } from '../discord-api.js';
 import { registrarNoLog } from '../log.js';
-import { EFEMERA, TIPO_RESPOSTA, json, mensagemEfemera, modal } from '../respostas.js';
+import { TIPO_RESPOSTA, json, mensagemEfemera, modal } from '../respostas.js';
+import { FLAGS_PREVIA, atualizarPrevia, concluirV2, respostaV2 } from './previa-v2.js';
 import { acharModelo, campoPorPapel } from '../modelos.js';
 import { validarLink } from '../validacao.js';
-
-// Pré-visualização: efêmera e em Components V2.
-const FLAGS_PREVIA = EFEMERA | FLAG_V2;
-
-const respostaV2 = (tipo, componentes, extras = {}) => json({
-  type: tipo,
-  data: {
-    flags: FLAGS_PREVIA,
-    components: componentes,
-    allowed_mentions: { parse: [] },
-    ...extras,
-  },
-});
 
 // Pré-visualização inteira: a linha de apoio em cima e o card com os controles.
 const previa = (modelo, estado) => [
   texto(textoDaPrevia(estado.escolha), IDS.APOIO),
   ...montarCartao({ modelo, controles: true, ...estado }),
 ];
-
-/**
- * Atualiza a pré-visualização pelo endpoint de edição da resposta original.
- * Mensagem V2 é editada por aqui, não pelo callback da interação (seção 12), e é
- * daqui que sai o motivo quando o Discord recusa: o callback não conta nada.
- */
-async function atualizarPrevia(interacao, componentes, extras = {}) {
-  try {
-    await editarRespostaOriginal(interacao.application_id, interacao.token, {
-      flags: FLAGS_PREVIA,
-      components: componentes,
-      allowed_mentions: { parse: [] },
-      ...extras,
-    });
-  } catch (erro) {
-    console.error('Falha ao atualizar a pré-visualização:', erro);
-    await concluirV2(interacao, 'Algo quebrou aqui do meu lado. Use /anuncio de novo.');
-  }
-}
-
-/**
- * Fecha a interação trocando o card por uma frase.
- * Numa mensagem V2 não existe `content`: a frase também é componente.
- */
-async function concluirV2(interacao, frase) {
-  try {
-    await editarRespostaOriginal(interacao.application_id, interacao.token, {
-      components: [texto(frase, IDS.FRASE)],
-      attachments: [],
-      allowed_mentions: { parse: [] },
-    });
-  } catch (erro) {
-    console.error('Falha ao fechar a pré-visualização:', erro);
-  }
-}
 
 // Envio de qualquer um dos formulários.
 export function tratarEnvioDoModal(interacao, env, ctx) {

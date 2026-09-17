@@ -37,6 +37,14 @@ export function criarMensagem(canalId, corpo, token) {
   return chamarDiscord('POST', `/channels/${canalId}/messages`, { token, corpo });
 }
 
+/**
+ * Edita uma mensagem de canal. É por aqui que o post do fórum ganha os componentes
+ * V2: a criação do post não aceita a flag (seção 12).
+ */
+export function editarMensagem(canalId, mensagemId, corpo, token) {
+  return chamarDiscord('PATCH', `/channels/${canalId}/messages/${mensagemId}`, { token, corpo });
+}
+
 // Post de fórum: o Discord devolve um canal (a thread) com a primeira mensagem dentro.
 export function criarPostNoForum(canalId, corpo, token) {
   return chamarDiscord('POST', `/channels/${canalId}/threads`, { token, corpo });

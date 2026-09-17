@@ -270,12 +270,20 @@ describe('pré-visualização em V2', () => {
     assert.equal(porTipo(api.edicao().corpo.components, 14).length, 0);
   });
 
-  test('evento: no card ficam quando e onde, com rótulo na mesma linha', async () => {
+  test('evento: no card fica onde e depois quando, com rótulo na mesma linha', async () => {
     const { resposta } = await previaPronta();
     const unix = Date.UTC(2026, 9, 15, 22, 0) / 1000;
+    const caixa = porTipo(resposta.data.components, 17)[0];
 
-    assert.equal(porIdDoComponente(resposta.data.components, 10).content, `📅 **Quando:** <t:${unix}:F>`);
-    assert.equal(porIdDoComponente(resposta.data.components, 11).content, '📍 **Onde:** Canal de voz Sala 1');
+    // A ordem no card é onde e depois quando, e os ids seguem essa ordem.
+    assert.deepEqual(
+      caixa.components.filter((item) => item.type === 10).map((item) => [item.id, item.content]),
+      [
+        [10, '📍 **Onde:** Canal de voz Sala 1'],
+        [11, `📅 **Quando:** <t:${unix}:F>`],
+        [7, '-# Autora: <@ADMIN1>'],
+      ],
+    );
     assert.equal(porIdDoComponente(resposta.data.components, 3).content, 'Conversa aberta sobre transição.');
   });
 
@@ -388,7 +396,7 @@ describe('editar texto', () => {
     assert.equal(resposta.type, 6, 'adia e edita, como manda a regra de V2');
     await esperarPendentes();
 
-    assert.equal(porIdDoComponente(ultimaEdicao().components, 11).content, '📍 **Onde:** Auditório');
+    assert.equal(porIdDoComponente(ultimaEdicao().components, 10).content, '📍 **Onde:** Auditório');
   });
 
   test('não apaga imagens nem desfaz as escolhas dos menus', async () => {
