@@ -5,14 +5,15 @@ import { criarMensagem } from './discord-api.js';
 /**
  * Escreve uma linha no canal de log. Nunca lança: falhar aqui não pode
  * impedir uma publicação que já aconteceu, então o erro só vai para o console.
+ * Hoje `detalhe` é sempre o link do post, como pede a seção 10.
  */
-export async function registrarNoLog(env, { acao, adminId, link }) {
+export async function registrarNoLog(env, { acao, adminId, detalhe }) {
   try {
     const agora = Math.floor(Date.now() / 1000);
     await criarMensagem(
       env.CANAL_LOG_ID,
       {
-        content: `${acao} por <@${adminId}> · ${link} · <t:${agora}:f>`,
+        content: `${acao} por <@${adminId}> · ${detalhe} · <t:${agora}:f>`,
         // Log não notifica ninguém, nem a admin citada.
         allowed_mentions: { parse: [] },
       },

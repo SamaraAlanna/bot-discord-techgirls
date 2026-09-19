@@ -56,7 +56,7 @@ function espionarApi({ falharEm, statusDoCdn = 200 } = {}) {
 
     if (endereco.includes('cdn.discordapp.com')) {
       if (statusDoCdn !== 200) return new Response('erro', { status: statusDoCdn });
-      return new Response(new Uint8Array(2048), { status: 200 });
+      return new Response(new Uint8Array(2048), { status: 200, headers: { 'content-type': 'image/png' } });
     }
     if (falharEm && endereco.includes(falharEm)) {
       return new Response('{"message":"Missing Access"}', { status: 403 });
@@ -119,6 +119,59 @@ const envioDoModal = (modelo, campos, { mensagem } = {}) => ({
   },
 });
 
+// Endereço do jeito que o Discord devolve na galeria: efêmero, com validade na query.
+const urlDoCdn = (n) => `https://cdn.discordapp.com/ephemeral-attachments/1/2/cartaz-${n}.png?ex=aa`;
+
+/**
+ * Confere o envio multipart inteiro: cada `files[n]` precisa ter o item de mesmo
+ * índice em `attachments`, com o mesmo nome, e a galeria precisa apontar para
+ * esses nomes. Um desencontro aqui é aceito pelo Discord e some na hora de exibir.
+ */
+function conferirMultipart(chamada, onde) {
+  const anexos = chamada.corpo.attachments ?? [];
+  assert.equal(anexos.length, chamada.arquivos.length, `${onde}: um item de attachments por arquivo`);
+
+  chamada.arquivos.forEach((nome, indice) => {
+    assert.deepEqual(anexos[indice], { id: indice, filename: nome }, `${onde}: files[${indice}] não casa`);
+  });
+
+  assert.deepEqual(
+    (porTipo(chamada.corpo.components, 12)[0]?.items ?? []).map((item) => item.media.url),
+    chamada.arquivos.map((nome) => `attachment://${nome}`),
+    `${onde}: a galeria aponta para os arquivos do mesmo envio`,
+  );
+}
+
+/**
+ * A galeria do jeito que o Discord a devolve: com o endereço do CDN já resolvido,
+ * nunca com `attachment://`. É assim que ela chega de volta em toda interação.
+ */
+function comoDiscordDevolve(componentes) {
+  const copia = JSON.parse(JSON.stringify(componentes));
+  let posicao = 0;
+
+  const percorrer = (lista) => {
+    for (const item of lista ?? []) {
+      if (item.type === 12) item.items = item.items.map(() => ({ media: { url: urlDoCdn(++posicao) } }));
+      if (item.components) percorrer(item.components);
+    }
+  };
+  percorrer(copia);
+  return copia;
+}
+
+// Põe uma galeria de N imagens num card que ainda não tem nenhuma.
+function comGaleriaNoCard(componentes, quantidade) {
+  const copia = JSON.parse(JSON.stringify(componentes));
+  const dentro = copia.find((item) => item.type === 17)?.components ?? copia;
+  dentro.push({
+    type: 12,
+    id: 5,
+    items: Array.from({ length: quantidade }, (_, i) => ({ media: { url: urlDoCdn(i + 1) } })),
+  });
+  return copia;
+}
+
 const anexo = (id, filename) => ({
   id,
   filename,
@@ -179,10 +232,16 @@ async function cliqueEEdicao(acao, modelo, mensagem, values) {
 }
 
 // Passa pelo menu de menção, que é o que destrava o Publicar.
-async function comMencao(escolha, modelo = 'evento', campos = EVENTO, anexos = []) {
+async function comMencao(escolha, modelo = 'evento', campos = EVENTO, imagens = 0) {
   const { mensagem } = await previaPronta(modelo, campos);
-  const { componentes } = await cliqueEEdicao('mencao', modelo, { ...mensagem, attachments: anexos }, [escolha]);
-  return { components: componentes, attachments: anexos };
+  const componentesComGaleria = imagens ? comGaleriaNoCard(mensagem.components, imagens) : mensagem.components;
+  const { componentes } = await cliqueEEdicao(
+    'mencao',
+    modelo,
+    { ...mensagem, components: componentesComGaleria, attachments: [] },
+    [escolha],
+  );
+  return { components: componentes, attachments: [] };
 }
 
 describe('comando', () => {
@@ -405,13 +464,13 @@ describe('editar texto', () => {
     await responder(envioDeImagens('evento', [anexo('0', 'cartaz.png')], comImagem));
     await esperarPendentes();
 
-    const atual = { components: ultimaEdicao().components, attachments: [anexo('55', 'cartaz.png')] };
+    const atual = { components: comoDiscordDevolve(ultimaEdicao().components), attachments: [] };
     await responder(envioDoModal('evento', { ...EVENTO, titulo: 'Outro' }, { mensagem: atual }));
     await esperarPendentes();
 
     const corpo = ultimaEdicao();
-    assert.equal(porTipo(corpo.components, 12)[0].items[0].media.url, 'attachment://cartaz.png');
-    assert.deepEqual(corpo.attachments, [{ id: '55', filename: 'cartaz.png' }]);
+    assert.equal(porTipo(corpo.components, 12)[0].items[0].media.url, urlDoCdn(1));
+    assert.equal(corpo.attachments, undefined, 'não há anexo listado para manter por id');
     assert.equal(menu(corpo.components, 'mencao', 'evento').options.find((o) => o.default).value, 'suporte');
     assert.equal(porIdDoComponente(corpo.components, 2).content, '# Outro');
   });
@@ -619,21 +678,21 @@ describe('publicar', () => {
     assert.deepEqual(api.publicacao().corpo.allowed_mentions, { parse: [], roles: [ID_SUPORTE] });
   });
 
-  test('com imagens, baixa dos anexos do clique e envia junto', async () => {
+  test('com imagens, baixa o que está na galeria e envia junto', async () => {
     const api = espionarApi();
-    const card = await comMencao('ninguem', 'evento', EVENTO, [anexo('55', 'cartaz.png')]);
+    const card = await comMencao('ninguem', 'evento', EVENTO, 1);
 
     await responder(clique('publicar', 'evento', card));
     await esperarPendentes();
 
     assert.equal(api.downloads().length, 1);
-    assert.deepEqual(api.publicacao().arquivos, ['cartaz.png']);
-    assert.deepEqual(api.publicacao().corpo.attachments, [{ id: 0, filename: 'cartaz.png' }]);
+    assert.deepEqual(api.publicacao().arquivos, ['imagem-1.png']);
+    assert.deepEqual(api.publicacao().corpo.attachments, [{ id: 0, filename: 'imagem-1.png' }]);
   });
 
   test('falha no download não publica nada', async () => {
     const api = espionarApi({ statusDoCdn: 403 });
-    const card = await comMencao('ninguem', 'evento', EVENTO, [anexo('55', 'cartaz.png')]);
+    const card = await comMencao('ninguem', 'evento', EVENTO, 1);
 
     await responder(clique('publicar', 'evento', card));
     await esperarPendentes();
@@ -695,104 +754,171 @@ describe('cancelar', () => {
 });
 
 describe('imagens anexadas nas atualizações', () => {
-  // O Discord devolve a galeria com a URL do CDN já resolvida, não com
-  // attachment://nome. Reproduzir isso é o que faz o teste valer.
-  function comoDiscordDevolve(componentes, anexos) {
-    const copia = JSON.parse(JSON.stringify(componentes));
-    let posicao = 0;
-
-    const percorrer = (lista) => {
-      for (const item of lista ?? []) {
-        if (item.type === 12) {
-          item.items = item.items.map(() => {
-            const anexo = anexos[posicao++];
-            return { media: { url: anexo.url } };
-          });
-        }
-        if (item.components) percorrer(item.components);
-      }
-    };
-    percorrer(copia);
-    return copia;
-  }
-
-  // Devolve a pré-visualização já com N imagens anexadas, do jeito que ela
-  // chega de volta numa interação.
+  // O Discord devolve `attachments` vazio e a galeria com o endereço do CDN
+  // resolvido (seção 12): é `comoDiscordDevolve` que reproduz isso.
+  // Devolve a pré-visualização já com N imagens, do jeito que ela volta numa interação.
   async function previaComImagens(quantidade) {
-    const anexos = Array.from({ length: quantidade }, (_, i) => anexo(`90${i}`, `cartaz-${i + 1}.png`));
     const { mensagem } = await previaPronta();
+    const enviadas = Array.from({ length: quantidade }, (_, i) => anexo(String(i), `cartaz-${i + 1}.png`));
 
-    await responder(envioDeImagens('evento', anexos.map((item, i) => anexo(String(i), item.filename)), mensagem));
+    await responder(envioDeImagens('evento', enviadas, mensagem));
     await esperarPendentes();
 
     return {
-      anexos,
-      mensagem: { components: comoDiscordDevolve(ultimaEdicao().components, anexos), attachments: anexos },
+      enderecos: Array.from({ length: quantidade }, (_, i) => urlDoCdn(i + 1)),
+      mensagem: { components: comoDiscordDevolve(ultimaEdicao().components), attachments: [] },
     };
   }
 
   for (const quantidade of [1, 4]) {
-    test(`menu mantém as ${quantidade} imagem(ns) com o nome original`, async () => {
+    test(`menu mantém as ${quantidade} imagem(ns) pelo endereço da galeria`, async () => {
       espionarApi();
-      const { anexos, mensagem } = await previaComImagens(quantidade);
+      const { enderecos, mensagem } = await previaComImagens(quantidade);
 
       const { corpo } = await cliqueEEdicao('mencao', 'evento', mensagem, ['here']);
 
       assert.deepEqual(
-        corpo.attachments,
-        anexos.map((item) => ({ id: item.id, filename: item.filename })),
-        'os anexos atuais são mantidos pelo id',
-      );
-      assert.deepEqual(
         porTipo(corpo.components, 12)[0].items.map((item) => item.media.url),
-        anexos.map((item) => `attachment://${item.filename}`),
-        'a galeria aponta para o nome original, na mesma ordem',
+        enderecos,
+        'a galeria volta com os mesmos endereços, na mesma ordem',
       );
+      assert.equal(corpo.attachments, undefined, 'não há anexo listado para manter por id');
     });
 
-    test(`editar texto mantém as ${quantidade} imagem(ns) com o nome original`, async () => {
+    test(`editar texto mantém as ${quantidade} imagem(ns) pelo endereço da galeria`, async () => {
       espionarApi();
-      const { anexos, mensagem } = await previaComImagens(quantidade);
+      const { enderecos, mensagem } = await previaComImagens(quantidade);
 
       await responder(envioDoModal('evento', { ...EVENTO, titulo: 'Outro título' }, { mensagem }));
       await esperarPendentes();
 
       const corpo = ultimaEdicao();
-      assert.deepEqual(corpo.attachments, anexos.map((item) => ({ id: item.id, filename: item.filename })));
-      assert.deepEqual(
-        porTipo(corpo.components, 12)[0].items.map((item) => item.media.url),
-        anexos.map((item) => `attachment://${item.filename}`),
-      );
+      assert.deepEqual(porTipo(corpo.components, 12)[0].items.map((item) => item.media.url), enderecos);
       assert.equal(porIdDoComponente(corpo.components, 2).content, '# Outro título');
     });
   }
 
-  test('nenhuma referência da galeria sai montada a partir de URL', async () => {
+  test('a edição nunca inventa attachment:// a partir do endereço', async () => {
     espionarApi();
     const { mensagem } = await previaComImagens(2);
 
     const { corpo } = await cliqueEEdicao('reacao', 'evento', mensagem, ['roxo']);
-    const referencias = porTipo(corpo.components, 12)[0].items.map((item) => item.media.url);
 
-    for (const referencia of referencias) {
-      assert.doesNotMatch(referencia, /cdn\.discordapp\.com|https|ephemeral-attachments/, referencia);
-      assert.match(referencia, /^attachment:\/\/[^/]+$/);
+    for (const item of porTipo(corpo.components, 12)[0].items) {
+      // Nome tirado de URL vira referência que não existe: 400 do Discord (seção 12).
+      assert.doesNotMatch(item.media.url, /^attachment:\/\//, item.media.url);
+      assert.match(item.media.url, /^https:\/\/cdn\.discordapp\.com\//);
     }
   });
 
-  test('publicar leva as imagens pelos nomes originais', async () => {
+  test('publicar baixa as imagens da galeria e sobe de novo, com nome próprio', async () => {
     const api = espionarApi();
-    const { anexos, mensagem } = await previaComImagens(2);
+    const { enderecos, mensagem } = await previaComImagens(2);
     const card = (await cliqueEEdicao('mencao', 'evento', mensagem, ['ninguem'])).componentes;
 
-    await responder(clique('publicar', 'evento', { components: card, attachments: anexos }));
+    await responder(clique('publicar', 'evento', { components: card, attachments: [] }));
     await esperarPendentes();
 
-    assert.deepEqual(api.publicacao().arquivos, anexos.map((item) => item.filename));
+    // Os primeiros downloads são do envio das imagens: os de agora são os do fim.
     assert.deepEqual(
-      porTipo(api.publicacao().corpo.components, 12)[0].items.map((item) => item.media.url),
-      anexos.map((item) => `attachment://${item.filename}`),
+      api.downloads().slice(-enderecos.length).map((item) => item.url),
+      enderecos,
+      'baixou o que estava na galeria',
     );
+    assert.deepEqual(api.publicacao().arquivos, ['imagem-1.png', 'imagem-2.png']);
+    conferirMultipart(api.publicacao(), 'publicação com imagens');
+  });
+
+  test('cada files[n] casa com attachments[n] e com a galeria, também no envio de imagens', async () => {
+    const api = espionarApi();
+    const { mensagem } = await previaPronta();
+
+    await responder(envioDeImagens('evento', [anexo('0', 'cartaz.png'), anexo('1', 'foto.png')], mensagem));
+    await esperarPendentes();
+
+    conferirMultipart(api.edicao(), 'troca de imagens');
+  });
+});
+
+describe('imagens publicadas', () => {
+  // Em toda resposta da API a mensagem volta com `attachments: []`, inclusive logo
+  // depois do envio que subiu o arquivo. Foi esse espião que fechou o caso: o fluxo
+  // lia os anexos, achava zero e publicava sem imagem.
+  function espionarComoOServidor() {
+    const chamadas = [];
+    ultimasChamadas = chamadas;
+    globalThis.fetch = async (url, opcoes = {}) => {
+      const endereco = String(url);
+      chamadas.push({
+        url: endereco,
+        metodo: opcoes.method ?? 'GET',
+        corpo: lerCorpo(opcoes.body),
+        arquivos: arquivosDoCorpo(opcoes.body),
+      });
+
+      if (endereco.includes('cdn.discordapp.com')) {
+        return new Response(new Uint8Array(2048), { status: 200, headers: { 'content-type': 'image/png' } });
+      }
+      return new Response(JSON.stringify({ id: 'MSG1', attachments: [] }), { status: 200 });
+    };
+    return {
+      chamadas,
+      publicacao: () => chamadas.find((c) => c.url.includes('/channels/CA/messages')),
+      downloads: () => chamadas.filter((c) => c.url.includes('cdn.discordapp.com')),
+      edicoes: () => chamadas.filter((c) => c.metodo === 'PATCH'),
+    };
+  }
+
+  const galeriaDe = (componentes) => (porTipo(componentes, 12)[0]?.items ?? []).map((item) => item.media.url);
+
+  // A galeria de volta no card, com o endereço resolvido, como o Discord devolve.
+  const comGaleria = (componentes, quantidade) => {
+    const copia = comoDiscordDevolve(componentes);
+    assert.equal(galeriaDe(copia).length, quantidade, 'a galeria continua no card');
+    return copia;
+  };
+
+  test('publica com as imagens mesmo com attachments vazio em toda resposta', async () => {
+    const api = espionarComoOServidor();
+
+    const { mensagem } = await previaPronta();
+    await responder(envioDeImagens('evento', [anexo('0', 'cartaz.png'), anexo('1', 'foto.png')], mensagem));
+    await esperarPendentes();
+
+    // Do envio das imagens até publicar, passando por um menu, como no servidor.
+    const card = comGaleria(ultimaEdicao().components, 2);
+    await responder(clique('mencao', 'evento', { components: card, attachments: [] }, ['ninguem']));
+    await esperarPendentes();
+
+    const naPrevia = galeriaDe(ultimaEdicao().components);
+    assert.equal(naPrevia.length, 2, 'a pré-visualização mostra as duas');
+
+    await responder(clique('publicar', 'evento', { components: ultimaEdicao().components, attachments: [] }));
+    await esperarPendentes();
+
+    assert.deepEqual(
+      api.downloads().slice(-naPrevia.length).map((item) => item.url),
+      naPrevia,
+      'publicou as mesmas da pré-visualização',
+    );
+    assert.equal(api.publicacao().arquivos.length, 2, 'os arquivos vão no multipart');
+    conferirMultipart(api.publicacao(), 'publicação');
+  });
+
+  test('sem imagem nenhuma, nada é inventado', async () => {
+    const api = espionarComoOServidor();
+
+    const { mensagem } = await previaPronta();
+    await responder(clique('mencao', 'evento', { ...mensagem, attachments: [] }, ['ninguem']));
+    await esperarPendentes();
+
+    await responder(clique('publicar', 'evento', { components: ultimaEdicao().components, attachments: [] }));
+    await esperarPendentes();
+
+    assert.deepEqual(api.publicacao().arquivos, []);
+    assert.equal(porTipo(api.publicacao().corpo.components, 12).length, 0);
+    assert.equal(api.publicacao().corpo.attachments, undefined);
+    assert.equal(api.downloads().length, 0, 'não tem o que baixar');
   });
 });
 
@@ -920,7 +1046,7 @@ describe('regras de Components V2 em toda resposta', () => {
 
     const edicao = api.edicao();
     assert.equal(edicao.corpo.flags, FLAGS_PREVIA, 'sem a flag, o Discord recusa a edição');
-    assert.equal(edicao.url.endsWith('/webhooks/APP/tok/messages/@original'), true);
+    assert.equal(edicao.url.includes('/webhooks/APP/tok/messages/@original'), true);
   });
 
   test('menus e botões adiam e editam pelo webhook, nunca respondem type 7', async () => {

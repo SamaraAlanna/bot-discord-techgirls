@@ -1,6 +1,6 @@
 // Fluxo do /anuncio em Components V2: formulário, pré-visualização, publicação.
 
-import { anexosParaManter, baixarImagens, nomesDosAnexos, validarImagensDoModal } from '../anexos.js';
+import { baixarDaGaleria, baixarImagens, validarImagensDoModal } from '../anexos.js';
 import { lerAutora } from '../autora.js';
 import { lerCamposDoModal } from '../componentes/comum.js';
 import {
@@ -15,7 +15,9 @@ import {
   montarErro,
   montarModalImagens,
   montarModalTexto,
+  temGaleria,
   textoDaPrevia,
+  urlsDaGaleria,
   valoresParaOModal,
 } from '../componentes/anuncio-componentes.js';
 import { FLAG_V2, texto } from '../componentes/v2.js';
@@ -28,7 +30,7 @@ import {
 } from '../discord-api.js';
 import { registrarNoLog } from '../log.js';
 import { TIPO_RESPOSTA, json, mensagemEfemera, modal } from '../respostas.js';
-import { FLAGS_PREVIA, atualizarPrevia, concluirV2, respostaV2 } from './previa-v2.js';
+import { FLAGS_PREVIA, atualizarPrevia, concluirV2, registrarEtapa, registrarFalha, respostaV2 } from './previa-v2.js';
 import { acharModelo, campoPorPapel } from '../modelos.js';
 import { validarLink } from '../validacao.js';
 
@@ -37,6 +39,22 @@ const previa = (modelo, estado) => [
   texto(textoDaPrevia(estado.escolha), IDS.APOIO),
   ...montarCartao({ modelo, controles: true, ...estado }),
 ];
+
+const FLUXO = 'anuncio';
+
+/**
+ * Imagens que a pré-visualização tem agora, lidas da galeria do card.
+ *
+ * Não adianta procurar em `attachments`: arquivo apontado por um componente sai
+ * dessa lista e ela volta vazia em toda resposta da API, inclusive logo depois do
+ * envio que subiu o arquivo (seção 12). A galeria é o que sobra, e ela guarda o
+ * endereço do CDN, que é mídia efêmera e o Worker consegue baixar.
+ */
+function imagensAtuais(interacao) {
+  const enderecos = urlsDaGaleria(interacao.message?.components ?? []);
+  registrarEtapa(FLUXO, 'imagens', `${enderecos.length} na galeria da pré-visualização`);
+  return enderecos;
+}
 
 // Envio de qualquer um dos formulários.
 export function tratarEnvioDoModal(interacao, env, ctx) {
@@ -83,23 +101,33 @@ function tratarEnvioDeTexto(interacao, modelo, ctx) {
     valores[campoDeData.id] = String(resultado.unix);
   }
 
-  const componentes = previa(modelo, {
+  const estado = {
     valores,
     autora,
-    // Editar texto nunca apaga imagem nem desfaz as escolhas dos menus.
-    // Os nomes vêm dos anexos da mensagem, na ordem em que estão nela.
-    imagens: nomesDosAnexos(interacao.message),
     escolha: anterior?.escolha ?? null,
     reacao: anterior?.reacao,
-  });
+  };
 
   if (!interacao.message) {
-    return respostaV2(TIPO_RESPOSTA.MENSAGEM, componentes);
+    return respostaV2(TIPO_RESPOSTA.MENSAGEM, previa(modelo, { ...estado, imagens: [] }));
   }
 
-  // Edição de mensagem V2 também passa pelo endpoint de edição.
-  ctx.waitUntil(atualizarPrevia(interacao, componentes, { attachments: anexosParaManter(interacao.message) }));
+  // Edição de mensagem V2 também passa pelo endpoint de edição, e as imagens
+  // precisam ser resolvidas antes de remontar o card.
+  ctx.waitUntil(salvarTexto(interacao, modelo, estado));
   return json({ type: TIPO_RESPOSTA.ATUALIZACAO_ADIADA });
+}
+
+// Editar texto nunca apaga imagem nem desfaz as escolhas dos menus.
+async function salvarTexto(interacao, modelo, estado) {
+  // A galeria é devolvida com os mesmos endereços que já estavam nela: é isso que
+  // mantém os arquivos na mensagem, já que não há id de anexo para repetir.
+  await atualizarPrevia(
+    interacao,
+    previa(modelo, { ...estado, imagens: imagensAtuais(interacao) }),
+    {},
+    FLUXO,
+  );
 }
 
 // Envio do formulário de imagens: o que veio substitui tudo que havia antes.
@@ -112,7 +140,7 @@ function tratarEnvioDeImagens(interacao, ctx, modelo) {
 
   // Sem arquivo nenhum: o anúncio fica sem imagens, e isso não precisa de rede.
   if (!novas.imagens.length) {
-    if (!nomesDosAnexos(interacao.message).length) return mensagemEfemera('Nada mudou nas imagens.');
+    if (!temGaleria(interacao.message?.components ?? [])) return mensagemEfemera('Nada mudou nas imagens.');
 
     ctx.waitUntil(atualizarPrevia(interacao, previa(modelo, { ...atual, imagens: [] }), { attachments: [] }));
     return json({ type: TIPO_RESPOSTA.ATUALIZACAO_ADIADA });
@@ -134,7 +162,7 @@ async function trocarImagens(interacao, modelo, atual, novas) {
       payload: {
         flags: FLAGS_PREVIA,
         // Texto e escolhas continuam como estavam: mexer em imagem não mexe no resto.
-        components: previa(modelo, { ...atual, imagens: arquivos.map((arquivo) => arquivo.nome) }),
+        components: previa(modelo, { ...atual, imagens: arquivos.map((arquivo) => `attachment://${arquivo.nome}`) }),
         // Só os arquivos novos entram na lista: os antigos saem da mensagem.
         attachments: arquivos.map((arquivo, indice) => ({ id: indice, filename: arquivo.nome })),
         allowed_mentions: { parse: [] },
@@ -175,18 +203,7 @@ export function tratarComponente(interacao, env, ctx) {
     const escolha = acao === ACAO.MENCAO ? valor : atual.escolha;
     const reacao = acao === ACAO.REACAO ? valor : atual.reacao;
 
-    ctx.waitUntil(atualizarPrevia(
-      interacao,
-      previa(modelo, {
-        valores: atual.valores,
-        autora: atual.autora,
-        // A galeria é remontada a partir dos anexos que a mensagem já tem.
-        imagens: nomesDosAnexos(interacao.message),
-        escolha,
-        reacao,
-      }),
-      { attachments: anexosParaManter(interacao.message) },
-    ));
+    ctx.waitUntil(salvarEscolha(interacao, modelo, { ...atual, escolha, reacao }));
     return json({ type: TIPO_RESPOSTA.ATUALIZACAO_ADIADA });
   }
 
@@ -200,15 +217,33 @@ export function tratarComponente(interacao, env, ctx) {
   return mensagemEfemera('Esse botão não existe mais, use /anuncio de novo.');
 }
 
+// Escolha de menção ou reação: remonta o card com as imagens que a mensagem já tem.
+async function salvarEscolha(interacao, modelo, estado) {
+  await atualizarPrevia(
+    interacao,
+    previa(modelo, {
+      valores: estado.valores,
+      autora: estado.autora,
+      imagens: imagensAtuais(interacao),
+      escolha: estado.escolha,
+      reacao: estado.reacao,
+    }),
+    {},
+    FLUXO,
+  );
+}
+
 // Roda depois da resposta adiada: publica, reage, registra no log e fecha.
 async function publicar(interacao, env, modelo, atual) {
   const adminId = interacao.member?.user?.id ?? interacao.user?.id;
-  const anexos = interacao.message?.attachments ?? [];
+  const enderecos = imagensAtuais(interacao);
+  registrarEtapa(FLUXO, 'publicar', `${enderecos.length} imagens para enviar`);
 
   let mensagem;
   try {
-    // As imagens vêm dos anexos da interação do clique, que são mídia efêmera.
-    const arquivos = anexos.length ? await baixarImagens(anexos) : [];
+    // As imagens da pré-visualização são baixadas e subidas de novo, com nome novo:
+    // o anúncio publicado tem arquivos próprios, sem depender dos efêmeros.
+    const arquivos = enderecos.length ? await baixarDaGaleria(enderecos) : [];
 
     mensagem = await enviarArquivos(`/channels/${env.CANAL_ANUNCIOS_ID}/messages`, {
       token: env.DISCORD_TOKEN,
@@ -219,7 +254,7 @@ async function publicar(interacao, env, modelo, atual) {
           modelo,
           valores: atual.valores,
           autora: atual.autora,
-          imagens: arquivos.map((arquivo) => arquivo.nome),
+          imagens: arquivos.map((arquivo) => `attachment://${arquivo.nome}`),
           escolha: atual.escolha,
           controles: false,
         }),
@@ -239,7 +274,7 @@ async function publicar(interacao, env, modelo, atual) {
   await deixarReacao(env, mensagem.id, atual.reacao);
 
   const link = linkDaMensagem(env.GUILD_ID, env.CANAL_ANUNCIOS_ID, mensagem.id);
-  await registrarNoLog(env, { acao: 'Anúncio publicado', adminId, link });
+  await registrarNoLog(env, { acao: 'Anúncio publicado', adminId, detalhe: link });
 
   await concluirV2(interacao, `Anúncio publicado: ${link}`);
 }

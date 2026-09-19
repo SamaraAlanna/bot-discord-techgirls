@@ -8,6 +8,21 @@ const USER_AGENT = 'DiscordBot (https://github.com/tech-girls/bot-tech-girls, 0.
  * Ele vai no caminho das rotas de webhook e vale como senha temporária:
  * quem o tiver pode responder no lugar do bot enquanto a interação viver.
  */
+/**
+ * Rotas de webhook só respeitam o campo `components` com `with_components=true`:
+ * a doc diz que o parâmetro "defaults to `false`". Sem ele a chamada volta 200 e a
+ * mensagem não muda (seção 12).
+ */
+function comComponentes(caminho) {
+  return caminho.includes('?') ? `${caminho}&with_components=true` : `${caminho}?with_components=true`;
+}
+
+/** Uma linha por chamada, para o tail mostrar onde o fluxo parou. */
+function registrarChamada(metodo, caminho, status, corpo) {
+  const resumo = String(corpo ?? '').slice(0, 300);
+  console.log(`[api] ${metodo} ${esconderToken(caminho)} -> ${status} ${resumo}`);
+}
+
 export function esconderToken(caminho) {
   return String(caminho).replace(/(\/webhooks\/[^/]+\/)[^/?]+/, '$1***');
 }
@@ -26,6 +41,8 @@ async function chamarDiscord(metodo, caminho, { token, corpo } = {}) {
   });
 
   const texto = await resposta.text();
+  registrarChamada(metodo, caminho, resposta.status, texto);
+
   if (!resposta.ok) {
     // O corpo do erro é onde o Discord diz qual campo recusou. Vai para o log do Worker.
     throw new Error(`${metodo} ${esconderToken(caminho)} devolveu ${resposta.status}: ${texto}`);
@@ -35,6 +52,20 @@ async function chamarDiscord(metodo, caminho, { token, corpo } = {}) {
 
 export function criarMensagem(canalId, corpo, token) {
   return chamarDiscord('POST', `/channels/${canalId}/messages`, { token, corpo });
+}
+
+// Canal ou thread. O objeto que vem na interação é parcial e não traz as tags.
+export function buscarCanal(canalId, token) {
+  return chamarDiscord('GET', `/channels/${canalId}`, { token });
+}
+
+// Tags, trancado e arquivado de uma thread vivem no próprio canal.
+export function editarCanal(canalId, corpo, token) {
+  return chamarDiscord('PATCH', `/channels/${canalId}`, { token, corpo });
+}
+
+export function buscarMensagem(canalId, mensagemId, token) {
+  return chamarDiscord('GET', `/channels/${canalId}/messages/${mensagemId}`, { token });
 }
 
 /**
@@ -50,9 +81,36 @@ export function criarPostNoForum(canalId, corpo, token) {
   return chamarDiscord('POST', `/channels/${canalId}/threads`, { token, corpo });
 }
 
+/**
+ * Lê a resposta original da interação.
+ * Serve para saber quais arquivos a mensagem tem: numa mensagem em Components V2 os
+ * anexos podem não vir no payload da interação (seção 12).
+ */
+export function buscarRespostaOriginal(applicationId, tokenDaInteracao) {
+  return chamarDiscord('GET', comComponentes(`/webhooks/${applicationId}/${tokenDaInteracao}/messages/@original`));
+}
+
 // Troca a resposta original da interação, usada depois de uma resposta adiada.
 export function editarRespostaOriginal(applicationId, tokenDaInteracao, corpo) {
-  return chamarDiscord('PATCH', `/webhooks/${applicationId}/${tokenDaInteracao}/messages/@original`, { corpo });
+  return chamarDiscord('PATCH', comComponentes(`/webhooks/${applicationId}/${tokenDaInteracao}/messages/@original`), { corpo });
+}
+
+/**
+ * Confere se cada `files[n]` tem o item de mesmo índice em `attachments`, com o
+ * mesmo nome. Um desencontro aqui é aceito pelo Discord, e o arquivo simplesmente
+ * não aparece: fica sem erro para capturar, então vira uma linha no console.
+ */
+function conferirAnexos(payload, arquivos) {
+  const anexos = payload?.attachments ?? [];
+  const desencontro = arquivos.length !== anexos.length
+    || arquivos.some((arquivo, indice) => anexos[indice]?.id !== indice || anexos[indice]?.filename !== arquivo.nome);
+
+  if (desencontro) {
+    console.error('[api] envio multipart inconsistente:', {
+      arquivos: arquivos.map((arquivo) => arquivo.nome),
+      attachments: anexos,
+    });
+  }
 }
 
 /**
@@ -61,6 +119,8 @@ export function editarRespostaOriginal(applicationId, tokenDaInteracao, corpo) {
  * Não definimos content-type na mão: o fetch monta o boundary sozinho.
  */
 export async function enviarArquivos(caminho, { token, payload, arquivos = [], metodo = 'POST' }) {
+  conferirAnexos(payload, arquivos);
+
   const formulario = new FormData();
   formulario.append('payload_json', JSON.stringify(payload));
 
@@ -78,6 +138,8 @@ export async function enviarArquivos(caminho, { token, payload, arquivos = [], m
   });
 
   const texto = await resposta.text();
+  registrarChamada(`${metodo} (multipart)`, caminho, resposta.status, texto);
+
   if (!resposta.ok) {
     throw new Error(`${metodo} ${esconderToken(caminho)} devolveu ${resposta.status}: ${texto}`);
   }
@@ -86,7 +148,7 @@ export async function enviarArquivos(caminho, { token, payload, arquivos = [], m
 
 // A resposta original da interação, que é a mensagem a ser editada depois do adiamento.
 export function caminhoDaRespostaOriginal(applicationId, tokenDaInteracao) {
-  return `/webhooks/${applicationId}/${tokenDaInteracao}/messages/@original`;
+  return comComponentes(`/webhooks/${applicationId}/${tokenDaInteracao}/messages/@original`);
 }
 
 /**

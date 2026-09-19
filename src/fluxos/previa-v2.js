@@ -24,6 +24,11 @@ export const adiarMensagem = () => json({
   data: { flags: EFEMERA },
 });
 
+/** Marca uma etapa concluída, para o tail mostrar até onde o fluxo chegou. */
+export function registrarEtapa(fluxo, etapa, detalhe = '') {
+  console.log(`[${fluxo}] ${etapa}: ok ${detalhe}`.trim());
+}
+
 /** Registra a falha de verdade antes de mostrar qualquer frase à admin. */
 export function registrarFalha(fluxo, etapa, erro) {
   console.error(`[${fluxo}] falhou em ${etapa}:`, erro instanceof Error ? erro.stack ?? erro.message : erro);
@@ -93,10 +98,15 @@ async function avisarEmTextoSimples(interacao, fluxo) {
   }
 }
 
-/** Fecha a interação trocando o card por uma frase, que também é componente. */
+/**
+ * Fecha a interação trocando o card por uma frase, que também é componente.
+ * A flag vai junto: sem ela a edição é tratada como mensagem antiga, os
+ * componentes somem e a interação fica presa no "está pensando" (seção 12).
+ */
 export async function concluirV2(interacao, frase, fluxo = 'fluxo') {
   try {
     await editarRespostaOriginal(interacao.application_id, interacao.token, {
+      flags: FLAGS_PREVIA,
       components: [texto(frase, ID_FRASE)],
       attachments: [],
       allowed_mentions: { parse: [] },

@@ -9,6 +9,7 @@ import { CURTO, PARAGRAFO, campoDeTexto, menuDeSelecao, opcoesDaLista } from './
 import {
   BOTAO_VERDE,
   BOTAO_VERMELHO,
+  CONTAINER,
   assinatura,
   botao,
   botaoDeLink,
@@ -233,6 +234,27 @@ export function textoSimples({ valores, escolhas }) {
     `🔗 Candidatar-se: ${valores.link}`,
   ];
   return linhas.join('\n');
+}
+
+/**
+ * Troca a cor do container do card publicado, mantendo o resto como está.
+ * Recolorir no lugar é mais seguro que remontar: não depende de reler o estado
+ * de um post que pode ser antigo.
+ */
+export function recolorir(componentes, cor) {
+  let achou = false;
+
+  const copiar = (lista) => (lista ?? []).map((item) => {
+    const copia = { ...item };
+    if (copia.type === CONTAINER) {
+      copia.accent_color = cor;
+      achou = true;
+    }
+    if (copia.components) copia.components = copiar(copia.components);
+    return copia;
+  });
+
+  return { componentes: copiar(componentes), achou };
 }
 
 // Linha de apoio acima do card, que vai encurtando conforme as escolhas são feitas.

@@ -31,11 +31,17 @@ export const secaoComMiniatura = (conteudo, urlDaImagem, id) => ({
   accessory: { type: MINIATURA, media: { url: urlDaImagem } },
 });
 
-// Galeria de 1 a 10 imagens. `attachment://nome` aponta para o arquivo anexado.
-export const galeria = (nomes, id) => ({
+/**
+ * Galeria de 1 a 10 imagens, montada com o endereço de cada uma.
+ * No envio de arquivo novo o endereço é `attachment://nome`, apontando para o
+ * arquivo que vai no mesmo multipart. Numa edição, é o endereço que o próprio
+ * Discord devolveu: numa mensagem V2 a galeria é a única pista dos arquivos,
+ * porque `attachments` volta vazio (seção 12).
+ */
+export const galeria = (enderecos, id) => ({
   type: GALERIA,
   ...(id ? { id } : {}),
-  items: nomes.map((nome) => ({ media: { url: `attachment://${nome}` } })),
+  items: enderecos.map((endereco) => ({ media: { url: endereco } })),
 });
 
 export const container = (corDeDestaque, componentes, id) => ({

@@ -162,9 +162,9 @@ describe('comando', () => {
     assert.equal(local.description, 'Opcional para remoto. Se for híbrido ou presencial, informe a cidade.');
   });
 
-  test('encerrar continua avisando que está em construção', async () => {
-    const resposta = await responder(comando('encerrar'));
-    assert.match(resposta.data.content, /ainda está sendo construído/);
+  test('subcomando desconhecido não quebra', async () => {
+    const resposta = await responder(comando('sortear'));
+    assert.match(resposta.data.content, /Não conheço esse subcomando/);
   });
 });
 
@@ -182,7 +182,7 @@ describe('pré-visualização em V2', () => {
     assert.equal(corpo.flags, FLAGS_PREVIA);
     assert.equal(corpo.content, undefined);
     assert.equal(corpo.embeds, undefined);
-    assert.ok(edicoesDaPrevia()[0].url.endsWith('/webhooks/APP/tok/messages/@original'));
+    assert.ok(edicoesDaPrevia()[0].url.includes('/webhooks/APP/tok/messages/@original'));
   });
 
   test('fora do container ficam título, empresa e descrição', async () => {
@@ -476,6 +476,315 @@ describe('cancelar', () => {
   });
 });
 
+describe('encerrar', () => {
+  const TAG_ENCERRADA = '1549751166152343633';
+  const TAGS_DO_POST = ['1549751047856332860', '1549750896567779369', '1549750989618151464'];
+
+  const CARTAO_PUBLICADO = [
+    { type: 10, id: 1, content: '# 💼 Pessoa Desenvolvedora Back-end' },
+    { type: 10, id: 2, content: '**Acme**' },
+    {
+      type: 17,
+      id: 4,
+      accent_color: 0xd81e9e,
+      components: [
+        { type: 10, id: 10, content: '🧭 **Área:** Desenvolvimento' },
+        { type: 10, id: 7, content: '-# Autora: <@ADMIN1>' },
+      ],
+    },
+  ];
+
+  // O comando roda dentro do post: a interação traz o canal parcial, com o pai.
+  const comandoEncerrar = ({ pai = 'CV', canal = 'POST1', membro = MEMBRO } = {}) => ({
+    type: 2,
+    application_id: 'APP',
+    token: 'tok',
+    guild_id: 'G1',
+    member: membro,
+    channel: { id: canal, type: 11, parent_id: pai },
+    data: { name: 'vaga', options: [{ name: 'encerrar', type: 1 }] },
+  });
+
+  function espionarPost({ tags = TAGS_DO_POST, componentes = CARTAO_PUBLICADO, falharEm } = {}) {
+    const chamadas = [];
+    ultimasChamadas = chamadas;
+    globalThis.fetch = async (url, opcoes = {}) => {
+      const endereco = String(url);
+      const metodo = opcoes.method ?? 'GET';
+      chamadas.push({ url: endereco, metodo, corpo: JSON.parse(opcoes.body ?? 'null') });
+
+      if (falharEm && falharEm({ url: endereco, metodo })) {
+        return new Response('{"message":"Missing Access"}', { status: 403 });
+      }
+      if (metodo === 'GET' && endereco.endsWith('/channels/POST1')) {
+        return new Response(JSON.stringify({ id: 'POST1', applied_tags: tags }), { status: 200 });
+      }
+      if (metodo === 'GET' && endereco.endsWith('/channels/POST1/messages/POST1')) {
+        return new Response(JSON.stringify({ id: 'POST1', components: componentes }), { status: 200 });
+      }
+      return new Response('{}', { status: 200 });
+    };
+    return {
+      chamadas,
+      canal: (corpoTem) => chamadas.find((c) => c.metodo === 'PATCH' && c.url.endsWith('/channels/POST1') && corpoTem(c.corpo)),
+      cartao: () => chamadas.find((c) => c.metodo === 'PATCH' && c.url.endsWith('/channels/POST1/messages/POST1')),
+      log: () => chamadas.find((c) => c.url.includes('/channels/CL/messages')),
+      fim: () => [...chamadas].reverse().find((c) => c.url.includes('/messages/@original'))?.corpo,
+    };
+  }
+
+  test('fora de um post do fórum de vagas, só explica onde usar', async () => {
+    const api = espionarPost();
+    const resposta = await responder(comandoEncerrar({ pai: 'OUTRO' }));
+
+    assert.equal(resposta.type, 4);
+    assert.equal(resposta.data.flags, 64);
+    assert.match(resposta.data.content, /dentro do post da vaga/);
+    assert.equal(api.chamadas.length, 0, 'não toca em nada');
+  });
+
+  test('num canal comum, que nem tem pai, também explica', async () => {
+    espionarPost();
+    const semPai = comandoEncerrar();
+    delete semPai.channel.parent_id;
+
+    const resposta = await responder(semPai);
+    assert.match(resposta.data.content, /dentro do post da vaga/);
+  });
+
+  test('dentro do post, adia e registra o trabalho', async () => {
+    espionarPost();
+    const resposta = await responder(comandoEncerrar());
+
+    assert.equal(resposta.type, 5, 'adia: são várias chamadas à API');
+    assert.equal(resposta.data.flags, 64);
+    assert.ok(pendentes.length > 0, 'deixou trabalho no waitUntil');
+    await esperarPendentes();
+  });
+
+  test('aplica a tag Encerrada mantendo as demais, e tranca', async () => {
+    const api = espionarPost();
+    await responder(comandoEncerrar());
+    await esperarPendentes();
+
+    const edicao = api.canal((corpo) => corpo.applied_tags);
+    assert.deepEqual(edicao.corpo.applied_tags, [...TAGS_DO_POST, TAG_ENCERRADA]);
+    assert.equal(edicao.corpo.locked, true);
+    assert.equal(edicao.corpo.archived, undefined, 'arquivar é outro passo');
+  });
+
+  test('arquiva por último, depois de recolorir o card', async () => {
+    const api = espionarPost();
+    await responder(comandoEncerrar());
+    await esperarPendentes();
+
+    // Só as edições do próprio post: a última é a confirmação para a admin.
+    const ordem = api.chamadas
+      .filter((c) => c.metodo === 'PATCH' && c.url.includes('/channels/POST1'))
+      .map((c) => (c.url.endsWith('/messages/POST1') ? 'card' : (c.corpo?.archived ? 'arquivar' : 'tags')));
+
+    assert.deepEqual(ordem, ['tags', 'card', 'arquivar']);
+  });
+
+  test('o card fica roxo-700', async () => {
+    const api = espionarPost();
+    await responder(comandoEncerrar());
+    await esperarPendentes();
+
+    const container = api.cartao().corpo.components.find((item) => item.type === 17);
+    assert.equal(container.accent_color, CORES.ENCERRADA);
+    assert.equal(container.accent_color, 0x4a2a8c);
+    assert.equal(container.components[0].content, '🧭 **Área:** Desenvolvimento', 'o resto do card não muda');
+  });
+
+  test('post no limite de tags: nenhuma tag é removida', async () => {
+    const cheio = ['1', '2', '3', '4', '5'];
+    const api = espionarPost({ tags: cheio });
+    await responder(comandoEncerrar());
+    await esperarPendentes();
+
+    const edicao = api.canal((corpo) => corpo.locked);
+    assert.equal(edicao.corpo.applied_tags, undefined, 'não mexe nas tags que a admin escolheu');
+    assert.equal(edicao.corpo.locked, true, 'tranca do mesmo jeito');
+  });
+
+  test('post no limite de tags: recolore, arquiva e avisa a admin', async () => {
+    const api = espionarPost({ tags: ['1', '2', '3', '4', '5'] });
+    await responder(comandoEncerrar());
+    await esperarPendentes();
+
+    assert.ok(api.cartao(), 'o card foi recolorido');
+    assert.ok(api.canal((corpo) => corpo.archived), 'o post foi arquivado');
+    assert.ok(api.log(), 'o log foi escrito');
+    assert.equal(
+      api.fim().components[0].content,
+      'Vaga encerrada, mas o post está no limite de tags e ficou sem a tag Encerrada.',
+    );
+  });
+
+  test('post no limite de tags: o motivo vai para o console', async () => {
+    const registrado = [];
+    const original = console.error;
+    console.error = (...args) => registrado.push(args.map(String).join(' '));
+
+    try {
+      espionarPost({ tags: ['1', '2', '3', '4', '5'] });
+      await responder(comandoEncerrar());
+      await esperarPendentes();
+    } finally {
+      console.error = original;
+    }
+
+    assert.match(registrado.join(' '), /\[vaga encerrar\] falhou em tags: post no limite de 5 tags/);
+  });
+
+  test('vaga já encerrada não mexe em nada', async () => {
+    const api = espionarPost({ tags: [...TAGS_DO_POST, TAG_ENCERRADA] });
+    await responder(comandoEncerrar());
+    await esperarPendentes();
+
+    assert.equal(api.canal(() => true), undefined, 'nenhuma edição do post');
+    assert.equal(api.log(), undefined);
+    assert.match(api.fim().components[0].content, /já está encerrada/);
+  });
+
+  test('registra no log e confirma', async () => {
+    const api = espionarPost();
+    await responder(comandoEncerrar());
+    await esperarPendentes();
+
+    const esperado = /^Vaga encerrada por <@ADMIN1> · https:\/\/discord\.com\/channels\/G1\/POST1 · <t:\d+:f>$/;
+    assert.match(api.log().corpo.content, esperado);
+    assert.deepEqual(api.log().corpo.allowed_mentions, { parse: [] });
+    assert.equal(api.fim().components[0].content, 'Vaga encerrada.');
+  });
+
+  test('se a tag falhar, nada é encerrado e a admin sabe', async () => {
+    const api = espionarPost({ falharEm: ({ url, metodo }) => metodo === 'PATCH' && url.endsWith('/channels/POST1') });
+    await responder(comandoEncerrar());
+    await esperarPendentes();
+
+    assert.equal(api.cartao(), undefined, 'não recolore');
+    assert.equal(api.log(), undefined, 'não registra no log');
+    assert.match(api.fim().components[0].content, /Não consegui encerrar a vaga/);
+  });
+
+  test('se a cor falhar, o encerramento segue e a admin é avisada', async () => {
+    const api = espionarPost({ falharEm: ({ url, metodo }) => metodo === 'PATCH' && url.endsWith('/messages/POST1') });
+    await responder(comandoEncerrar());
+    await esperarPendentes();
+
+    assert.ok(api.canal((corpo) => corpo.applied_tags), 'a tag foi aplicada');
+    assert.ok(api.log(), 'o log foi escrito');
+    assert.match(api.fim().components[0].content, /ficou com a cor antiga/);
+  });
+
+  test('post sem card não quebra o encerramento', async () => {
+    const api = espionarPost({ componentes: [] });
+    await responder(comandoEncerrar());
+    await esperarPendentes();
+
+    assert.equal(api.cartao(), undefined, 'não tenta editar o que não existe');
+    assert.ok(api.log());
+    assert.match(api.fim().components[0].content, /ficou com a cor antiga/);
+  });
+
+  describe('recoloração do card', () => {
+    // Editar mensagem V2 sem a flag faz os componentes serem descartados, e o post
+    // fica com "a mensagem original foi excluída". É o bug que estes testes seguram.
+    test('a edição vai com a flag de Components V2', async () => {
+      const api = espionarPost();
+      await responder(comandoEncerrar());
+      await esperarPendentes();
+
+      assert.equal(api.cartao().corpo.flags, 32768);
+    });
+
+    test('preserva todos os componentes, mudando só a cor', async () => {
+      const api = espionarPost();
+      await responder(comandoEncerrar());
+      await esperarPendentes();
+
+      const enviados = api.cartao().corpo.components;
+      assert.equal(enviados.length, CARTAO_PUBLICADO.length, 'nenhum componente some');
+
+      const semCor = (lista) => JSON.parse(JSON.stringify(lista), (chave, valor) => (chave === 'accent_color' ? undefined : valor));
+      assert.deepEqual(semCor(enviados), semCor(CARTAO_PUBLICADO), 'só a cor muda');
+
+      const container = enviados.find((item) => item.type === 17);
+      assert.equal(container.components.length, 2, 'o conteúdo do container continua lá');
+    });
+
+    test('nunca edita com componentes vazios', async () => {
+      const api = espionarPost({ componentes: [] });
+      await responder(comandoEncerrar());
+      await esperarPendentes();
+
+      assert.equal(api.cartao(), undefined, 'não toca na mensagem publicada');
+      assert.match(api.fim().components[0].content, /ficou com a cor antiga/);
+    });
+
+    test('nunca edita quando não acha o container', async () => {
+      const api = espionarPost({ componentes: [{ type: 10, id: 1, content: '💼 vaga antiga em texto simples' }] });
+      await responder(comandoEncerrar());
+      await esperarPendentes();
+
+      assert.equal(api.cartao(), undefined);
+      assert.match(api.fim().components[0].content, /ficou com a cor antiga/);
+    });
+  });
+
+  describe('a interação sempre conclui', () => {
+    // Qualquer caminho tem que fechar o "está pensando", inclusive quando algo falha.
+    const CAMINHOS = [
+      ['tudo certo', {}],
+      ['post já encerrado', { tags: ['1', TAG_ENCERRADA] }],
+      ['falha na tag', { falharEm: ({ url, metodo }) => metodo === 'PATCH' && url.endsWith('/channels/POST1') }],
+      ['falha na cor', { falharEm: ({ url, metodo }) => metodo === 'PATCH' && url.endsWith('/messages/POST1') }],
+      ['falha ao ler o post', { falharEm: ({ url, metodo }) => metodo === 'GET' && url.endsWith('/channels/POST1') }],
+      ['post sem card', { componentes: [] }],
+    ];
+
+    for (const [nome, opcoes] of CAMINHOS) {
+      test(`${nome}: a resposta adiada é fechada`, async () => {
+        const api = espionarPost(opcoes);
+        const original = console.error;
+        console.error = () => {};
+
+        try {
+          await responder(comandoEncerrar());
+          await esperarPendentes();
+        } finally {
+          console.error = original;
+        }
+
+        const fim = api.fim();
+        assert.ok(fim, `${nome}: nada fechou a interação`);
+        // A frase também é componente, e a edição precisa da flag.
+        assert.equal(fim.flags, 64 | 32768, `${nome}: sem a flag a frase não aparece`);
+        assert.ok(String(fim.components?.[0]?.content ?? '').trim(), `${nome}: frase vazia`);
+      });
+    }
+  });
+
+  test('todo erro deixa o motivo no console', async () => {
+    const registrado = [];
+    const original = console.error;
+    console.error = (...args) => registrado.push(args.map(String).join(' '));
+
+    try {
+      espionarPost({ falharEm: ({ url, metodo }) => metodo === 'PATCH' && url.endsWith('/channels/POST1') });
+      await responder(comandoEncerrar());
+      await esperarPendentes();
+    } finally {
+      console.error = original;
+    }
+
+    assert.match(registrado.join(' '), /\[vaga encerrar\] falhou em tag e trancamento/);
+    assert.match(registrado.join(' '), /Missing Access/);
+  });
+});
+
 describe('trabalho adiado', () => {
   // Toda resposta adiada precisa deixar trabalho no waitUntil, senão o Discord fica
   // preso em "está pensando" e o Worker encerra sem fazer nada.
@@ -531,7 +840,7 @@ describe('trabalho adiado', () => {
     await responder(envioDoModal(VAGA));
     await esperarPendentes();
 
-    const edicoes = api.chamadas.filter((c) => c.url.endsWith('/messages/@original'));
+    const edicoes = api.chamadas.filter((c) => c.url.includes('/messages/@original'));
     assert.equal(edicoes.length, 1);
     assert.equal(edicoes[0].metodo, 'PATCH');
   });
@@ -540,7 +849,7 @@ describe('trabalho adiado', () => {
     let tentativas = 0;
     globalThis.fetch = async (url, opcoes = {}) => {
       const endereco = String(url);
-      if (endereco.endsWith('/messages/@original')) {
+      if (endereco.includes('/messages/@original')) {
         tentativas += 1;
         // A primeira falha, como aconteceria se a mensagem ainda não existisse.
         if (tentativas === 1) return new Response('{"message":"Unknown Message"}', { status: 404 });
@@ -573,7 +882,7 @@ describe('trabalho adiado', () => {
       chamadas.push({ url: endereco, corpo });
 
       // Só a edição com componentes falha; a de texto simples passa.
-      if (endereco.endsWith('/messages/@original') && corpo?.components) {
+      if (endereco.includes('/messages/@original') && corpo?.components) {
         return new Response('{"message":"Invalid Form Body"}', { status: 400 });
       }
       return new Response('{}', { status: 200 });
@@ -662,6 +971,18 @@ describe('regras de Components V2', () => {
     }
   });
 
+  test('toda chamada a rota de webhook leva with_components=true', async () => {
+    const { api } = await todoOFluxo();
+    const webhooks = api.chamadas.filter((chamada) => chamada.url.includes('/webhooks/'));
+
+    assert.ok(webhooks.length >= 6);
+    for (const chamada of webhooks) {
+      // Sem o parâmetro, a doc diz que o campo components é ignorado: a chamada
+      // volta 200 e a mensagem não muda.
+      assert.ok(chamada.url.includes('with_components=true'), chamada.url);
+    }
+  });
+
   test('toda edição da pré-visualização vai com a flag V2 e pelo webhook', async () => {
     const { api } = await todoOFluxo();
     const edicoes = api.chamadas.filter((chamada) => chamada.url.includes('/webhooks/'));
@@ -669,7 +990,7 @@ describe('regras de Components V2', () => {
     assert.ok(edicoes.length >= 6);
     for (const edicao of edicoes) {
       assert.equal(edicao.metodo, 'PATCH');
-      assert.ok(edicao.url.endsWith('/messages/@original'), edicao.url);
+      assert.ok(edicao.url.includes('/messages/@original'), edicao.url);
       // O fechamento manda só a frase, sem flag; o resto é card e vai com a flag.
       if (edicao.corpo.flags !== undefined) assert.equal(edicao.corpo.flags, FLAGS_PREVIA);
     }

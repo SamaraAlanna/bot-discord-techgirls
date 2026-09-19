@@ -73,20 +73,42 @@ export async function baixarImagens(anexos) {
   return arquivos;
 }
 
-/**
- * Nomes dos arquivos já anexados, na ordem em que estão na mensagem.
- * É daqui que a galeria tira o `attachment://nome`: nunca da URL do componente,
- * porque o Discord devolve a galeria já com o endereço do CDN resolvido.
- */
-export function nomesDosAnexos(mensagem) {
-  return (mensagem?.attachments ?? []).map((anexo) => anexo.filename);
-}
+// Extensão aceita pelo Discord no upload, a partir do tipo do arquivo.
+const EXTENSAO_DO_TIPO = {
+  'image/png': 'png',
+  'image/jpeg': 'jpg',
+  'image/gif': 'gif',
+  'image/webp': 'webp',
+};
 
 /**
- * Lista de anexos a manter numa edição de mensagem.
- * Na v10 da API, editar sem mandar `attachments` apaga os anexos existentes,
- * então toda atualização da pré-visualização precisa repetir esta lista.
+ * Baixa as imagens que já estão na pré-visualização, pelos endereços da galeria.
+ *
+ * É o único caminho possível: arquivo apontado por um componente **some** da lista
+ * `attachments` da mensagem (seção 12), então não há id nem nome para reaproveitar.
+ * Os arquivos voltam com nome novo, numerado, montado aqui: o nome nunca sai do
+ * endereço, e é o mesmo nome que vai para `attachments` e para a galeria do envio.
  */
-export function anexosParaManter(mensagem) {
-  return (mensagem?.attachments ?? []).map((anexo) => ({ id: anexo.id, filename: anexo.filename }));
+export async function baixarDaGaleria(enderecos = []) {
+  const arquivos = [];
+
+  for (const [indice, endereco] of enderecos.entries()) {
+    const resposta = await fetch(endereco);
+    if (!resposta.ok) {
+      throw new Error(`download da imagem ${indice + 1} devolveu ${resposta.status}`);
+    }
+
+    const tipo = (resposta.headers.get('content-type') ?? '').split(';')[0].trim();
+    if (!TIPOS_ACEITOS.includes(tipo)) {
+      throw new Error(`imagem ${indice + 1} voltou como ${tipo || 'tipo desconhecido'}`);
+    }
+
+    arquivos.push({
+      nome: `imagem-${indice + 1}.${EXTENSAO_DO_TIPO[tipo]}`,
+      tipo,
+      bytes: await resposta.arrayBuffer(),
+    });
+  }
+
+  return arquivos;
 }

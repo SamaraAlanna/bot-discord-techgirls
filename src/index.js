@@ -55,7 +55,7 @@ export async function rotear(interacao, env, ctx) {
       return pong();
 
     case TIPO_INTERACAO.COMANDO:
-      return rotearComando(interacao);
+      return rotearComando(interacao, env, ctx);
 
     case TIPO_INTERACAO.COMPONENTE:
       return rotearPorPrefixo(interacao, (fluxo) => fluxo.tratarComponente(interacao, env, ctx));
@@ -68,11 +68,11 @@ export async function rotear(interacao, env, ctx) {
   }
 }
 
-function rotearComando(interacao) {
+function rotearComando(interacao, env, ctx) {
   const nome = interacao.data?.name;
 
   if (nome === 'anuncio') return comandoAnuncio(interacao);
-  if (nome === 'vaga') return comandoVaga(interacao);
+  if (nome === 'vaga') return comandoVaga(interacao, env, ctx);
 
   return mensagemEfemera('Não conheço esse comando, ele pode ter sido removido.');
 }

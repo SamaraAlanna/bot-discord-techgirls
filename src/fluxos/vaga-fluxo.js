@@ -144,7 +144,7 @@ async function publicar(interacao, env, estado) {
   const virouCartao = await trocarPeloCartao(env, post, estado);
 
   const link = linkDoPost(env.GUILD_ID, post.id);
-  await registrarNoLog(env, { acao: 'Vaga publicada', adminId, link });
+  await registrarNoLog(env, { acao: 'Vaga publicada', adminId, detalhe: link });
 
   await concluirV2(interacao, virouCartao
     ? `Vaga publicada: ${link}`

@@ -190,6 +190,22 @@ export function montarCartao({ modelo, valores, imagens = [], autora, escolha, r
   ];
 }
 
+// O card tem galeria? Serve para saber se há o que remover, sem precisar dos nomes.
+export function temGaleria(componentes) {
+  return Boolean(porId(componentes, new Map()).get(IDS.GALERIA));
+}
+
+/**
+ * Endereços das imagens que a pré-visualização já tem.
+ * Numa mensagem em Components V2 o arquivo apontado por um componente sai da lista
+ * `attachments`, que volta sempre vazia: a galeria é a única fonte da verdade
+ * sobre as imagens (seção 12). Aqui só se lê o endereço, nunca um nome de arquivo.
+ */
+export function urlsDaGaleria(componentes) {
+  const galeriaAtual = porId(componentes, new Map()).get(IDS.GALERIA);
+  return (galeriaAtual?.items ?? []).map((item) => item?.media?.url).filter(Boolean);
+}
+
 /** Card de erro: a frase, o rascunho do jeito que ficaria e o botão Corrigir. */
 export function montarErro({ modelo, frase, valores, autora }) {
   return [
@@ -202,8 +218,8 @@ export function montarErro({ modelo, frase, valores, autora }) {
 /**
  * Relê o estado a partir dos componentes, pelos ids numéricos.
  * O valor de cada campo vem sem o rótulo que o próprio código escreveu.
- * As imagens não saem daqui: elas vêm dos anexos da mensagem (`nomesDosAnexos`),
- * porque a galeria devolvida pelo Discord traz a URL do CDN, não o nome do arquivo.
+ * As imagens não saem daqui: elas vêm da própria galeria (`urlsDaGaleria`),
+ * que o Discord devolve com o endereço do CDN já resolvido.
  */
 export function lerCartao(modelo, componentes) {
   const indice = porId(componentes, new Map());
