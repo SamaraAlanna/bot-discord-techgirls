@@ -939,7 +939,8 @@ describe('cancelar', () => {
 
 describe('imagens anexadas nas atualizações', () => {
   // O Discord devolve `attachments` vazio e a galeria com o endereço do CDN
-  // resolvido (seção 12): é `comoDiscordDevolve` que reproduz isso.
+  // resolvido, porque arquivo referenciado por componente sai da lista: é
+  // `comoDiscordDevolve` que reproduz isso.
   // Devolve a pré-visualização já com N imagens, do jeito que ela volta numa interação.
   async function previaComImagens(quantidade) {
     const { mensagem } = await previaPronta();
@@ -989,7 +990,8 @@ describe('imagens anexadas nas atualizações', () => {
     const { corpo } = await cliqueEEdicao('reacao', 'evento', mensagem, ['roxo']);
 
     for (const item of porTipo(corpo.components, 12)[0].items) {
-      // Nome tirado de URL vira referência que não existe: 400 do Discord (seção 12).
+      // Nome tirado de URL vira referência que não existe: o Discord responde 400
+      // UNFURLED_MEDIA_ITEM_REFERENCED_ATTACHMENT_NOT_FOUND.
       assert.doesNotMatch(item.media.url, /^attachment:\/\//, item.media.url);
       assert.match(item.media.url, /^https:\/\/cdn\.discordapp\.com\//);
     }

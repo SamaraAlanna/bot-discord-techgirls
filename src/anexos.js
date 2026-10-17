@@ -1,7 +1,8 @@
 // Imagens do anúncio: validação e download.
 //
 // Arquivo enviado por modal é mídia **efêmera** do CDN, e é por isso que isso
-// funciona: o Worker consegue baixar mídia efêmera, mas não a permanente (seção 9.1).
+// funciona: o CDN do Discord devolve 403 para o Workers baixar mídia permanente, mas
+// libera a efêmera. Nenhum fluxo pode depender de baixar mídia já publicada.
 // Os bytes passam pela memória do isolate, que tem 128 MB, daí os limites abaixo.
 
 const TIPOS_ACEITOS = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
@@ -32,7 +33,7 @@ export function validarImagensDoModal(interacao, chaves) {
   }
 
   // Os erros não citam nome de arquivo nem tamanho: o detalhe vai para o console,
-  // a admin recebe uma frase que diz o que fazer (seção 9.6).
+  // a admin recebe uma frase sem linguagem técnica que diz o que fazer.
   const foraDoTipo = anexos.find((anexo) => !ehImagem(anexo));
   if (foraDoTipo) {
     console.warn('Anexo recusado por tipo:', foraDoTipo.filename, foraDoTipo.content_type);
@@ -84,8 +85,10 @@ const EXTENSAO_DO_TIPO = {
 /**
  * Baixa as imagens que já estão na pré-visualização, pelos endereços da galeria.
  *
- * É o único caminho possível: arquivo apontado por um componente **some** da lista
- * `attachments` da mensagem (seção 12), então não há id nem nome para reaproveitar.
+ * É o único caminho possível: o Discord tira da lista `attachments` todo arquivo que
+ * um componente referencia. A mensagem volta com `attachments: []` em toda resposta,
+ * mesmo logo depois do envio que subiu a imagem, então não há id nem nome para
+ * reaproveitar; sobra o endereço que a galeria guarda.
  * Os arquivos voltam com nome novo, numerado, montado aqui: o nome nunca sai do
  * endereço, e é o mesmo nome que vai para `attachments` e para a galeria do envio.
  */

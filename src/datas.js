@@ -1,5 +1,5 @@
 // Conversão de data e hora digitada pelas admins, sempre em horário de Brasília.
-// Brasília é UTC−3 e hoje não tem horário de verão (seção 8.3 do CLAUDE.md).
+// Brasília é UTC−3 e hoje não tem horário de verão.
 // Se o horário de verão voltar, este é o único arquivo a mexer.
 
 const HORAS_ATRAS_DE_UTC = 3;
@@ -49,7 +49,7 @@ export function formatarBrasilia(unix) {
 /**
  * Texto do campo "Quando": só o timestamp nativo, que cada pessoa vê no próprio fuso.
  * A data digitada é lida como horário de Brasília, e quem avisa disso é a descrição
- * do campo no formulário (seção 8.3 do CLAUDE.md).
+ * do campo no formulário.
  */
 export function textoDeQuando(unix) {
   return `<t:${unix}:F>`;

@@ -15,6 +15,9 @@ export const TIPO_RESPOSTA = {
   MENSAGEM: 4,
   MENSAGEM_ADIADA: 5,
   ATUALIZACAO_ADIADA: 6,
+  // Não serve para mensagem em Components V2: o Discord recusa sem avisar o Worker, e
+  // a admin vê "não respondeu a tempo". Mensagem V2 se atualiza com o 6 mais a edição
+  // pelo webhook (fluxos/previa-v2.js).
   ATUALIZAR_MENSAGEM: 7,
   MODAL: 9,
 };
@@ -34,20 +37,10 @@ export function pong() {
   return json({ type: TIPO_RESPOSTA.PONG });
 }
 
-// Abre um modal em resposta a um comando.
+// Abre um modal, em resposta a comando ou botão. Envio de modal não pode abrir outro
+// modal ("Not available for MODAL_SUBMIT"), por isso todo formulário novo sai de um botão.
 export function modal(dados) {
   return json({ type: TIPO_RESPOSTA.MODAL, data: dados });
-}
-
-// Troca o conteúdo da mensagem que tem o componente acionado.
-export function atualizarMensagem(dados) {
-  return json({ type: TIPO_RESPOSTA.ATUALIZAR_MENSAGEM, data: dados });
-}
-
-// "Estou cuidando disso": segura a interação enquanto a API do Discord responde.
-// Depois disso, a resposta é concluída editando a mensagem original.
-export function adiarAtualizacao() {
-  return json({ type: TIPO_RESPOSTA.ATUALIZACAO_ADIADA });
 }
 
 // Mensagem visível só para quem acionou, sem menções ativas.

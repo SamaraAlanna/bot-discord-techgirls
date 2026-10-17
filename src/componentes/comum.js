@@ -1,4 +1,4 @@
-// Peças de componente usadas pelos dois fluxos: campos de modal, menus, botões e autoria.
+// Peças de componente usadas pelos dois fluxos: campos de modal, upload, menus e opções.
 
 // Tipos de componente da API.
 export const ACTION_ROW = 1;
@@ -19,7 +19,7 @@ const BOTAO_VERMELHO = 4;
 // "1500" vira "1.500", como se escreve número em português.
 const comMilhar = (numero) => String(numero).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
 
-// A doc limita a descrição do Label a 100 caracteres (seção 12).
+// A doc limita a descrição do Label a 100 caracteres (e o rótulo a 45).
 export const MAXIMO_DESCRICAO_DO_CAMPO = 100;
 
 /**
@@ -45,7 +45,9 @@ export function campoDeTexto({ rotulo, descricao, id, estilo, obrigatorio, exemp
       ...(maximo ? { max_length: maximo } : {}),
       // `value` deixa o campo já preenchido, que é o que permite reabrir para editar.
       // Ele nunca passa do máximo: um rascunho salvo com limite maior geraria um
-      // formulário que o Discord recusa sem avisar ninguém (seção 12).
+      // formulário inválido. Modal é resposta de interação, validada pelo Discord
+      // depois que o Worker já respondeu: a recusa não volta como erro, e a admin só
+      // vê "não respondeu a tempo".
       ...(valor ? { value: maximo ? String(valor).slice(0, maximo) : valor } : {}),
     },
   };

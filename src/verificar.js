@@ -27,6 +27,8 @@ async function importarChavePublica(chavePublicaHex) {
     throw new Error('DISCORD_PUBLIC_KEY ausente ou fora do formato esperado.');
   }
 
+  // A doc do Workers diz que não aceita `raw` para Ed25519, mas a ressalva é sobre a
+  // chave privada e o formato legado NODE-ED25519: chave pública em `raw` funciona.
   const chave = await crypto.subtle.importKey('raw', bytes, { name: 'Ed25519' }, false, ['verify']);
   chaveEmCache = { hex: chavePublicaHex, chave };
   return chave;

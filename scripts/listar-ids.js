@@ -8,7 +8,7 @@
 import { FUNCOES_POR_AREA, TAGS_AREA } from '../src/config.js';
 import { carregarAmbiente, chamarApi, exigir } from './comum.js';
 
-// Nomes esperados, na ordem da seção 9.2 do CLAUDE.md.
+// Nomes das tags que o fórum de vagas precisa ter, agrupados como no menu do /vaga.
 const TAGS_ESPERADAS = {
   Senioridade: ['Estágio', 'Trainee', 'Júnior', 'Pleno', 'Sênior', 'Especialista', 'Liderança'],
   Modalidade: ['Remoto', 'Híbrido', 'Presencial'],
@@ -19,7 +19,8 @@ const TAGS_ESPERADAS = {
   Status: ['Encerrada'],
 };
 
-// Cargos da seção 9.3. O emoji fica fora da comparação: só o nome importa.
+// Cargo que o menu de menção do /anuncio oferece. O emoji fica fora da comparação:
+// só o nome importa, então "⚙️ Suporte" casa com "Suporte".
 const CARGOS_DE_ANUNCIO = ['Suporte'];
 
 // Cargos que o /vaga nova menciona: o de cada área e os das funções dela, com os
@@ -74,7 +75,7 @@ function conferirGrupo(rotulo, esperados, indice, usados) {
   console.log(`\n${rotulo}`);
   console.log(linhas.join('\n') || '  (nenhum encontrado)');
   if (faltando.length) {
-    console.log(`  ⚠ esperado pelo CLAUDE.md e não encontrado: ${faltando.join(', ')}`);
+    console.log(`  ⚠ esperado pelo bot e não encontrado: ${faltando.join(', ')}`);
   }
   return faltando;
 }
@@ -114,14 +115,14 @@ async function principal() {
 
   const tagsSobrando = tags.filter((tag) => !tagsUsadas.has(tag.id));
   if (tagsSobrando.length) {
-    console.log(`\n  ⚠ tags do fórum fora do CLAUDE.md: ${tagsSobrando.map((t) => `${t.name} (${t.id})`).join(', ')}`);
+    console.log(`\n  ⚠ tags do fórum que o bot não conhece: ${tagsSobrando.map((t) => `${t.name} (${t.id})`).join(', ')}`);
   }
   if (tagsRepetidas.length) {
     console.log(`  ⚠ tags com nome repetido: ${tagsRepetidas.map((t) => `${t.name} (${t.id})`).join(', ')}`);
   }
 
   // 3. Cargos. Aqui não listamos o que sobra: o servidor tem dezenas de cargos legítimos
-  // fora da seção 9.3. Interessa o que falta, o que é ambíguo e o que não é mencionável.
+  // fora dos menus do bot. Interessa o que falta, o que é ambíguo e o que não é mencionável.
   const guilda = await chamarApi('GET', `/guilds/${ambiente.GUILD_ID}`, { token });
   const cargos = guilda.roles ?? [];
   const { indice: indiceCargos, repetidos: cargosRepetidos } = indexar(cargos);
@@ -139,7 +140,7 @@ async function principal() {
   }
 
   // Cargo não mencionável só notifica se o bot tiver a permissão de mencionar
-  // todos os cargos naquele canal (seção 11).
+  // todos os cargos naquele canal, dada como exceção só nos canais de avisos e de vagas.
   const naoMencionaveis = cargos.filter((cargo) => ehEsperado(cargo) && !cargo.mentionable);
   if (naoMencionaveis.length) {
     console.log(`  ⚠ não estão mencionáveis: ${naoMencionaveis.map((c) => c.name).join(', ')}`);

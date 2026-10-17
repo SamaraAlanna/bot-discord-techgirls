@@ -16,7 +16,7 @@ const SUBCOMANDO = 1;
 
 // default_member_permissions: "0" esconde o comando de todo mundo, menos de quem
 // tem permissão de administrador. As admins podem liberar cargos específicos depois,
-// em Configurações do servidor > Integrações > Manage (seção 8 do CLAUDE.md).
+// em Configurações do servidor > Integrações > Manage. O campo é string (bitset), não número.
 const SO_ADMIN = '0';
 
 const COMANDOS = [

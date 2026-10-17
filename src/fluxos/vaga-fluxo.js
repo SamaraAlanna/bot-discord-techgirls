@@ -41,7 +41,7 @@ const previa = (estado) => [
 const FLUXO = 'vaga';
 
 // Adia e cria a pré-visualização pela edição da resposta original: mensagem em
-// Components V2 não nasce pelo callback da interação (seção 12).
+// Components V2 não nasce pelo callback da interação (ver previa-v2.js).
 function criarPrevia(interacao, ctx, componentes) {
   ctx.waitUntil(atualizarPrevia(interacao, componentes, {}, FLUXO));
   return adiarMensagem();
@@ -60,7 +60,6 @@ function mostrar(interacao, ctx, componentes) {
   return json({ type: TIPO_RESPOSTA.ATUALIZACAO_ADIADA });
 }
 
-// Envio do formulário.
 export function tratarEnvioDoModal(interacao, env, ctx) {
   const campos = lerCamposDoModal(interacao.data?.components);
   const autora = lerAutora(interacao);
@@ -93,7 +92,6 @@ export function tratarEnvioDoModal(interacao, env, ctx) {
   return mostrar(interacao, ctx, previa({ valores, escolhas, autora }));
 }
 
-// Menus e botões da pré-visualização.
 export function tratarComponente(interacao, env, ctx) {
   const { acao } = lerAcao(interacao.data?.custom_id);
   const componentes = interacao.message?.components ?? [];
@@ -176,8 +174,10 @@ export function tratarComponente(interacao, env, ctx) {
 
 /**
  * Cria o post no fórum e registra no log.
- * O post nasce com o texto simples, porque a criação não aceita a flag de
- * Components V2 (seção 12), e logo depois a primeira mensagem é editada para o card.
+ * O post nasce com o texto simples, porque a criação de post em fórum não aceita a
+ * flag de Components V2 (a doc só libera SUPPRESS_EMBEDS e SUPPRESS_NOTIFICATIONS ali),
+ * e logo depois a primeira mensagem é editada para o card. O texto simples é completo
+ * de propósito: se a edição falhar, a vaga continua publicada e legível.
  */
 async function publicar(interacao, env, estado) {
   const adminId = interacao.member?.user?.id ?? interacao.user?.id;
@@ -185,9 +185,10 @@ async function publicar(interacao, env, estado) {
   const publicacao = { ...estado, cargos };
 
   // content e allowed_mentions pertencem ao objeto `message`, não à raiz do corpo:
-  // é o Forum and Media Thread Message Params da doc (seção 12).
+  // é o Forum and Media Thread Message Params da doc. Na raiz, seriam ignorados.
   const mensagem = {
-    // A menção vai aqui, na criação: é a criação que notifica (seção 12).
+    // A menção vai aqui, na criação: menção acrescentada depois, por edição, não
+    // notifica ninguém. A doc não fala disso; é o que a comunidade relata.
     content: textoSimples(publicacao),
     allowed_mentions: mencoesDaVaga(cargos),
   };

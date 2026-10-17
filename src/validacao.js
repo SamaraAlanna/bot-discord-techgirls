@@ -1,7 +1,7 @@
 // Validações de campos digitados pelas admins.
 
 /**
- * O link precisa ser https e uma URL válida (seção 8.1.3 do CLAUDE.md).
+ * O link precisa ser https e uma URL válida: ele vira o botão que as membras clicam.
  * Devolve { link } já limpo, { link: null } quando o campo é opcional e veio vazio,
  * ou { erro } com uma frase.
  */

@@ -9,17 +9,18 @@ import { verificarAssinatura } from './verificar.js';
 
 export default {
   async fetch(request, env, ctx) {
-    // 1. Só POST. O Discord nunca usa outro método nesta URL.
+    // O Discord nunca usa outro método nesta URL.
     if (request.method !== 'POST') {
       return new Response('Method Not Allowed', { status: 405, headers: { allow: 'POST' } });
     }
 
-    // 2. Corpo bruto: a assinatura cobre o texto exato, então nada de parse antes da hora.
+    // A assinatura cobre o texto exato do corpo, então nada de parse antes de conferir.
     const assinatura = request.headers.get('x-signature-ed25519');
     const timestamp = request.headers.get('x-signature-timestamp');
     const corpoBruto = await request.text();
 
-    // 3. Assinatura inválida ou ausente para a conversa aqui.
+    // O 401 não é só boa prática: o Discord manda assinaturas inválidas de propósito em
+    // verificações de rotina e, se o bot aceitar, remove a URL de interações do app.
     const assinaturaValida = await verificarAssinatura({
       corpoBruto,
       assinatura,
@@ -40,7 +41,7 @@ export default {
     try {
       return await rotear(interacao, env, ctx);
     } catch (erro) {
-      // 4. Erro interno: detalhe fica no log do Worker, a admin recebe um aviso curto.
+      // O detalhe fica no log do Worker; para a admin vai só um aviso curto, sem stack nem token.
       console.error('Erro ao tratar a interação:', erro);
       return mensagemEfemera('Algo quebrou aqui do meu lado. Tenta de novo em instantes.');
     }
@@ -77,7 +78,9 @@ function rotearComando(interacao, env, ctx) {
   return mensagemEfemera('Não conheço esse comando, ele pode ter sido removido.');
 }
 
-// O custom_id sempre começa com o nome do fluxo, como em "anuncio:publicar" (seção 7).
+// O custom_id sempre começa com o nome do fluxo, como em "anuncio:publicar". Ele guarda
+// só a ação: tem limite de 100 caracteres e não serve para os dados, que moram na
+// própria mensagem de pré-visualização (não há banco de dados).
 const FLUXOS = {
   anuncio: fluxoDeAnuncio,
   vaga: fluxoDeVaga,

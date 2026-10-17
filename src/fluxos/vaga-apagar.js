@@ -1,4 +1,4 @@
-// Fluxo do /vaga apagar (seção 8.4 do CLAUDE.md).
+// Fluxo do /vaga apagar: pergunta com o título e, só no botão, o apagamento.
 //
 // Apagar um post não tem volta: a doc diz "Deleting a guild channel cannot be
 // undone". Por isso o comando só pergunta, mostrando o título, e quem apaga é o

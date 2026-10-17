@@ -1,8 +1,11 @@
 // Peças comuns aos fluxos que usam pré-visualização em Components V2.
 //
 // Duas regras valem para os dois comandos e estão aqui para não se perderem:
-// mensagem V2 não leva `content` nem `embeds`, e ela se edita pelo endpoint de
-// edição da resposta original, nunca pelo callback da interação (seção 12).
+// mensagem V2 não leva `content` nem `embeds`, e ela se cria e se edita pelo endpoint
+// de edição da resposta original, nunca pelo callback da interação. A doc diz, sobre
+// IS_COMPONENTS_V2: "you must do that with the edit original response endpoint". Pelo
+// callback, o Discord recusa depois que o Worker já respondeu: nenhum erro chega aqui,
+// e a admin vê "não respondeu a tempo". Por isso tudo adia e edita pelo webhook.
 
 import { FLAG_V2, texto } from '../componentes/v2.js';
 import { editarRespostaOriginal } from '../discord-api.js';
@@ -15,9 +18,10 @@ export const FLAGS_PREVIA = EFEMERA | FLAG_V2;
 export const ID_FRASE = 9;
 
 /**
- * Adia a criação de uma mensagem efêmera.
+ * Adia a criação de uma mensagem efêmera. O Discord dá 3 segundos para a primeira
+ * resposta; o trabalho com a API roda depois, em `ctx.waitUntil`, e termina na edição.
  * Numa resposta adiada "the only valid message flag you may use is `EPHEMERAL`",
- * e é por isso que a flag de Components V2 entra só na edição seguinte (seção 12).
+ * e é por isso que a flag de Components V2 entra só na edição seguinte.
  */
 export const adiarMensagem = () => json({
   type: TIPO_RESPOSTA.MENSAGEM_ADIADA,
@@ -34,6 +38,9 @@ export function registrarFalha(fluxo, etapa, erro) {
   console.error(`[${fluxo}] falhou em ${etapa}:`, erro instanceof Error ? erro.stack ?? erro.message : erro);
 }
 
+// Resposta de callback já com a flag V2. Só o /anuncio ainda a usa, para criar a
+// primeira pré-visualização: funciona no servidor, mas é o único lugar fora do caminho
+// que a doc manda (adiar e editar). Se um dia der "não respondeu a tempo", é aqui.
 export const respostaV2 = (tipo, componentes, extras = {}) => json({
   type: tipo,
   data: {
@@ -44,9 +51,10 @@ export const respostaV2 = (tipo, componentes, extras = {}) => json({
   },
 });
 
-// Numa resposta adiada, a mensagem original só passa a existir quando o Discord
-// termina de processar o adiamento. Sem esta pausa, a primeira edição se perde e a
-// admin fica no "está pensando" para sempre: confirmado no servidor (seção 12).
+// Corrida da mensagem adiada: a resposta original só passa a existir quando o Discord
+// termina de processar o adiamento, e o Worker chega antes. A primeira edição se
+// perdia e a admin ficava no "está pensando" para sempre. Uma segunda tentativa depois
+// desta pausa resolveu no servidor.
 const PAUSA_ANTES_DE_INSISTIR = 400;
 
 const esperar = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -102,8 +110,8 @@ async function avisarEmTextoSimples(interacao, fluxo) {
 
 /**
  * Fecha a interação trocando o card por uma frase, que também é componente.
- * A flag vai junto: sem ela a edição é tratada como mensagem antiga, os
- * componentes somem e a interação fica presa no "está pensando" (seção 12).
+ * A flag vai junto, como em toda edição de mensagem V2: sem ela a edição é recusada
+ * e a interação fica presa no "está pensando".
  */
 export async function concluirV2(interacao, frase, fluxo = 'fluxo') {
   try {

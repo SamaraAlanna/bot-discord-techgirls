@@ -1,8 +1,8 @@
-// Fluxo do /vaga encerrar (seção 8.2 do CLAUDE.md).
+// Fluxo do /vaga encerrar: tag Encerrada, trancamento, card roxo e arquivamento.
 //
 // Ordem importa: tag e trancamento primeiro, depois a cor do card, e arquivar por
 // último, porque a doc diz que uma thread arquivada só aceita edição se a própria
-// edição a desarquivar (seção 12).
+// edição a desarquivar ("The thread must have `archived` set to `false`").
 
 import { recolorir } from '../componentes/vaga-componentes.js';
 import { FLAG_V2 } from '../componentes/v2.js';
@@ -15,7 +15,7 @@ import { concluirV2, registrarEtapa, registrarFalha } from './previa-v2.js';
 
 const FLUXO = 'vaga encerrar';
 
-// Um post de fórum aceita no máximo 5 tags (seção 12).
+// Um post de fórum aceita no máximo 5 tags ("limited to 5"); o fórum, 20.
 const MAXIMO_DE_TAGS = 5;
 
 /** Só faz sentido dentro de um post do fórum de vagas. */
@@ -112,7 +112,7 @@ async function recolorirOCartao(env, postId) {
     }
 
     // A flag precisa ir em toda edição de mensagem V2: sem ela os componentes
-    // são descartados e a mensagem fica vazia (seção 12).
+    // são descartados e o post fica com "A mensagem original foi excluída".
     // O card pode ter a menção dos cargos da vaga. allowed_mentions vazio garante
     // que encerrar nunca avisa ninguém de novo.
     await editarMensagem(

@@ -13,6 +13,7 @@ export function comandoAnuncio(interacao, env) {
   const modelo = acharModelo(subcomando);
 
   if (!modelo) return mensagemEfemera('Não conheço esse modelo de anúncio, ele pode ter sido removido.');
-  // O id da interação deixa o formulário único a cada comando (seção 12).
+  // O id da interação deixa o formulário único a cada comando. Suspeita, não
+  // documentada: o cliente devolve o que foi digitado num formulário de mesmo custom_id.
   return modal(montarModalTexto(modelo, {}, interacao.id));
 }

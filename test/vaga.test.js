@@ -199,7 +199,7 @@ describe('pré-visualização em V2', () => {
     const { resposta, corpo } = await previaPronta();
 
     // Numa resposta adiada a única flag válida é EPHEMERAL: a de Components V2
-    // entra na edição seguinte (seção 12).
+    // entra na edição seguinte.
     assert.equal(resposta.type, 5);
     assert.equal(resposta.data.flags, 64);
     assert.equal(resposta.data.components, undefined);
@@ -746,7 +746,8 @@ describe('menção no post', () => {
     const api = await publicarCom(ESCOLHAS_COM_FUNCAO);
     const corpo = api.post().corpo;
 
-    // A raiz do Start Thread in Forum tem name, applied_tags e message (seção 12).
+    // A raiz do Start Thread in Forum tem name, applied_tags e message; content e
+    // allowed_mentions vão dentro de message.
     assert.deepEqual(Object.keys(corpo).sort(), ['applied_tags', 'message', 'name']);
     assert.equal(corpo.content, undefined, 'content na raiz seria ignorado');
     assert.equal(corpo.allowed_mentions, undefined, 'allowed_mentions na raiz seria ignorado');

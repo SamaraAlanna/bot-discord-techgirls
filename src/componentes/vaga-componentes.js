@@ -124,7 +124,7 @@ export const SELECOES = [
 export const MAXIMO_TITULO = 100;
 
 /**
- * Limite de cada campo do formulário (seção 9.9). Quem aperta é o texto simples
+ * Limite de cada campo do formulário. Quem aperta é o texto simples
  * que cria o post, porque `content` aceita até 2000 caracteres e leva tudo junto:
  * menção, título, empresa, descrição, escolhas, local e link. Um teste monta o pior
  * caso com estes valores e confere que cabe.
@@ -138,7 +138,6 @@ export const MAXIMOS = {
   descricao: 1000,
 };
 
-// Campos sem os quais não dá para publicar.
 const OBRIGATORIOS = [
   { chave: 'titulo', nome: 'título do cargo' },
   { chave: 'empresa', nome: 'empresa' },
@@ -184,7 +183,7 @@ export const RASCUNHO_EM_BRANCO = Object.freeze({ titulo: '', empresa: '', link:
 
 const rotuloDaEscolha = (lista, valor) => lista.find((item) => item.valor === valor)?.rotulo ?? SEM_ESCOLHA;
 
-// A doc limita o rótulo do botão a 80 caracteres (seção 12).
+// A doc limita o rótulo do botão a 80 caracteres, e o `url` dele a 512.
 export const MAXIMO_ROTULO_DO_BOTAO = 80;
 const PREFIXO_DO_BOTAO = 'Candidatar-se em ';
 
@@ -201,7 +200,8 @@ export function rotuloDoBotao(dominio) {
 }
 
 /**
- * Card da vaga, no formato da seção 9.5.
+ * Card da vaga. Fora do container: menção, título, empresa e descrição. Dentro:
+ * área, senioridade, modalidade, local, o botão Candidatar-se e a assinatura.
  * `controles` liga os menus e botões da pré-visualização.
  * `cargos` são os mencionados acima do card. Por padrão saem das escolhas; na
  * publicação vêm já conferidos contra os cargos que existem no servidor.
@@ -345,14 +345,14 @@ export function tagsDasEscolhas(escolhas = {}) {
 
 /**
  * Texto simples da vaga, usado na criação do post.
- * A criação de post em fórum não aceita a flag de Components V2 (seção 12), então o
+ * A criação de post em fórum não aceita a flag de Components V2, então o
  * post nasce com este texto e logo depois é editado para o card. Se a edição falhar,
  * isto é o que fica publicado, e continua completo.
  */
 export function textoSimples({ valores, escolhas, cargos = cargosDaVaga(escolhas).cargos }) {
   const linhas = [
     // É esta linha que notifica: menção acrescentada depois, na edição para o
-    // card, não avisa ninguém (seção 12).
+    // card, não avisa ninguém. Por isso a menção está aqui e não só no card.
     ...(cargos.length ? [textoDaMencao(cargos), ''] : []),
     `💼 **${valores.titulo}**`,
     `**${valores.empresa}**`,

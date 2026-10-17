@@ -1,6 +1,7 @@
 // Montagem do /anuncio em Components V2: formulários, card e controles.
 //
-// O estado mora nos próprios componentes da pré-visualização (seção 7 do CLAUDE.md).
+// Não há banco de dados: o estado do rascunho mora nos próprios componentes da
+// pré-visualização, e cada clique relê a mensagem que veio na interação.
 // Para não depender do texto visível, cada peça leva um `id` numérico fixo, definido
 // aqui, e a leitura procura por esse id. O modelo escolhido viaja no custom_id.
 
@@ -67,7 +68,6 @@ export const IDS = {
   campo: (posicao) => 10 + posicao,
 };
 
-// Campo do modal de imagens.
 export const CAMPO_IMAGENS = 'imagens';
 
 /**
@@ -94,8 +94,8 @@ export function montarModalTexto(modelo, valores = {}, unico = null) {
 /**
  * Formulário de imagens: um campo só, o upload.
  * O que for enviado substitui todas as imagens do anúncio, e enviar vazio tira todas.
- * Nada de menu de remoção: ele era o único componente novo neste modal quando o
- * Discord passou a recusar a tela (seção 12).
+ * Nada de menu de remoção: com um String Select a mais, o Discord passou a recusar
+ * este modal sem erro nenhum no Worker, e a versão só com o upload sempre funcionou.
  */
 export function montarModalImagens(modelo, unico = null) {
   return {
@@ -171,8 +171,8 @@ export function montarCartao({
     dentro.push(linha([botaoDeLink(modelo.rotuloDoBotao, valores[campoDeLink.id], IDS.BOTAO_LINK)]));
   }
 
-  // A assinatura fecha o container. Components V2 não tem alinhamento (seção 12),
-  // então ela fica à esquerda mesmo, só menor.
+  // A assinatura fecha o container. Components V2 não tem campo de alinhamento em
+  // nenhum componente, então ela fica à esquerda mesmo, só menor.
   dentro.push(texto(`-# Autora: <@${autora?.id ?? '0'}>`, IDS.AUTORA));
 
   const cartao = [];
@@ -262,7 +262,9 @@ export function temGaleria(componentes) {
  * Endereços das imagens que a pré-visualização já tem.
  * Numa mensagem em Components V2 o arquivo apontado por um componente sai da lista
  * `attachments`, que volta sempre vazia: a galeria é a única fonte da verdade
- * sobre as imagens (seção 12). Aqui só se lê o endereço, nunca um nome de arquivo.
+ * sobre as imagens. Aqui só se lê o endereço, nunca um nome de arquivo: o Discord
+ * devolve a URL do CDN já resolvida, e um nome tirado dela aponta para anexo que
+ * não existe (400 UNFURLED_MEDIA_ITEM_REFERENCED_ATTACHMENT_NOT_FOUND).
  */
 export function urlsDaGaleria(componentes) {
   const galeriaAtual = porId(componentes, new Map()).get(IDS.GALERIA);

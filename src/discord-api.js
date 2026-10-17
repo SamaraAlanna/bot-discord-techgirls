@@ -4,25 +4,29 @@ const API = 'https://discord.com/api/v10';
 const USER_AGENT = 'DiscordBot (https://github.com/tech-girls/bot-tech-girls, 0.1.0)';
 
 /**
- * Esconde o token da interação antes de qualquer log.
- * Ele vai no caminho das rotas de webhook e vale como senha temporária:
- * quem o tiver pode responder no lugar do bot enquanto a interação viver.
- */
-/**
  * Rotas de webhook só respeitam o campo `components` com `with_components=true`:
- * a doc diz que o parâmetro "defaults to `false`". Sem ele a chamada volta 200 e a
- * mensagem não muda (seção 12).
+ * a doc diz que o parâmetro "defaults to `false`" e que só com ele um webhook do app
+ * "use all components". Sem ele o Discord pode ignorar os componentes e devolver 200
+ * mesmo assim, sem erro nenhum para capturar.
  */
 function comComponentes(caminho) {
   return caminho.includes('?') ? `${caminho}&with_components=true` : `${caminho}?with_components=true`;
 }
 
-/** Uma linha por chamada, para o tail mostrar onde o fluxo parou. */
+/**
+ * Uma linha por chamada, inclusive as que dão certo: vários defeitos do Discord são
+ * "200 sem efeito", e só o registro de cada chamada mostra onde o fluxo parou.
+ */
 function registrarChamada(metodo, caminho, status, corpo) {
   const resumo = String(corpo ?? '').slice(0, 300);
   console.log(`[api] ${metodo} ${esconderToken(caminho)} -> ${status} ${resumo}`);
 }
 
+/**
+ * Esconde o token da interação antes de qualquer log.
+ * Ele vai no caminho das rotas de webhook e vale como senha temporária:
+ * quem o tiver pode responder no lugar do bot enquanto a interação viver.
+ */
 export function esconderToken(caminho) {
   return String(caminho).replace(/(\/webhooks\/[^/]+\/)[^/?]+/, '$1***');
 }
@@ -61,7 +65,8 @@ export function buscarCanal(canalId, token) {
 
 /**
  * Apaga um canal ou uma thread, como um post de fórum. Não tem volta: a doc diz
- * "Deleting a guild channel cannot be undone". Thread pede MANAGE_THREADS (seção 12).
+ * "Deleting a guild channel cannot be undone". Para thread, a permissão exigida é
+ * MANAGE_THREADS, e não MANAGE_CHANNELS.
  */
 export function apagarCanal(canalId, token) {
   return chamarDiscord('DELETE', `/channels/${canalId}`, { token });
@@ -78,7 +83,8 @@ export function buscarMensagem(canalId, mensagemId, token) {
 
 /**
  * Edita uma mensagem de canal. É por aqui que o post do fórum ganha os componentes
- * V2: a criação do post não aceita a flag (seção 12).
+ * V2: na criação do post, a doc só permite as flags SUPPRESS_EMBEDS e
+ * SUPPRESS_NOTIFICATIONS, então IS_COMPONENTS_V2 só entra numa edição depois.
  */
 export function editarMensagem(canalId, mensagemId, corpo, token) {
   return chamarDiscord('PATCH', `/channels/${canalId}/messages/${mensagemId}`, { token, corpo });
@@ -92,15 +98,6 @@ export function buscarCargos(guildId, token) {
 // Post de fórum: o Discord devolve um canal (a thread) com a primeira mensagem dentro.
 export function criarPostNoForum(canalId, corpo, token) {
   return chamarDiscord('POST', `/channels/${canalId}/threads`, { token, corpo });
-}
-
-/**
- * Lê a resposta original da interação.
- * Serve para saber quais arquivos a mensagem tem: numa mensagem em Components V2 os
- * anexos podem não vir no payload da interação (seção 12).
- */
-export function buscarRespostaOriginal(applicationId, tokenDaInteracao) {
-  return chamarDiscord('GET', comComponentes(`/webhooks/${applicationId}/${tokenDaInteracao}/messages/@original`));
 }
 
 // Troca a resposta original da interação, usada depois de uma resposta adiada.
@@ -180,21 +177,4 @@ export function linkDaMensagem(guildId, canalId, mensagemId) {
 // O post de fórum é um canal, então o link tem duas partes, sem o ID de mensagem.
 export function linkDoPost(guildId, postId) {
   return `https://discord.com/channels/${guildId}/${postId}`;
-}
-
-/**
- * Fecha uma interação que foi adiada, trocando a pré-visualização pelo resultado.
- * Não lança: se nem isso funcionar, só resta registrar no console.
- */
-export async function concluirInteracao(interacao, conteudo) {
-  try {
-    await editarRespostaOriginal(interacao.application_id, interacao.token, {
-      content: conteudo,
-      embeds: [],
-      components: [],
-      allowed_mentions: { parse: [] },
-    });
-  } catch (erro) {
-    console.error('Falha ao fechar a pré-visualização:', erro);
-  }
 }

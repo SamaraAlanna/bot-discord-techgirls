@@ -1,7 +1,12 @@
-// Peças de Components V2, usadas pelo card do /anuncio.
+// Peças de Components V2, usadas pelos cards do /vaga e do /anuncio.
 //
 // Uma mensagem V2 liga a flag IS_COMPONENTS_V2 e, com ela, `content` e `embeds`
 // deixam de valer: todo o conteúdo vira componente.
+//
+// A flag precisa ir em **toda** edição de uma mensagem V2, não só na primeira. Sem
+// ela, a edição é tratada como mensagem antiga, os componentes são descartados e o
+// post fica vazio, com "A mensagem original foi excluída". A doc só diz que a flag
+// não pode ser removida; a regra de mandar sempre veio desse defeito.
 
 export const FLAG_V2 = 1 << 15; // 32768
 
@@ -24,19 +29,13 @@ export const BOTAO_LINK = 5;
 // A doc diz que ele precisa ser único na mensagem e que, sem ele, a API gera em sequência.
 export const texto = (conteudo, id) => ({ type: TEXTO, ...(id ? { id } : {}), content: conteudo });
 
-// Texto com uma imagem pequena à direita, usado para a autora com avatar.
-export const secaoComMiniatura = (conteudo, urlDaImagem, id) => ({
-  type: SECAO,
-  components: [texto(conteudo, id)],
-  accessory: { type: MINIATURA, media: { url: urlDaImagem } },
-});
-
 /**
  * Galeria de 1 a 10 imagens, montada com o endereço de cada uma.
  * No envio de arquivo novo o endereço é `attachment://nome`, apontando para o
  * arquivo que vai no mesmo multipart. Numa edição, é o endereço que o próprio
  * Discord devolveu: numa mensagem V2 a galeria é a única pista dos arquivos,
- * porque `attachments` volta vazio (seção 12).
+ * porque o Discord tira de `attachments` todo arquivo que um componente referencia.
+ * Devolver a galeria com os mesmos endereços é o que mantém as imagens na mensagem.
  */
 export const galeria = (enderecos, id) => ({
   type: GALERIA,

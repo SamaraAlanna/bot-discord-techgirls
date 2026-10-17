@@ -2,7 +2,7 @@
 // IDs de canais não entram neste arquivo: vêm das vars do wrangler.toml, pelo env.
 // Os IDs de tags e cargos abaixo vieram de `npm run ids` (scripts/listar-ids.js).
 
-// Os cards recebem cor em inteiro decimal (seção 9.4 do CLAUDE.md).
+// O `accent_color` do Container é um inteiro decimal, não o hex da marca.
 const cor = (hex) => parseInt(hex.slice(1), 16);
 
 export const CORES = {
@@ -38,7 +38,7 @@ export const TAGS_MODALIDADE = [
 ];
 
 // Cada área é tag do fórum e também cargo do servidor: o post da vaga menciona
-// o cargo da área (seção 8.1). `cargoId` nulo quer dizer cargo não encontrado,
+// o cargo da área. `cargoId` nulo quer dizer cargo não encontrado,
 // e aí a vaga sai sem essa menção, com o motivo no console. Do mesmo jeito, `id`
 // nulo quer dizer tag não encontrada no fórum, e a vaga sai sem a tag da área.
 export const TAGS_AREA = [
@@ -107,7 +107,7 @@ export const FUNCAO_NAO_ESPECIFICADA = { valor: 'nao-especificar', rotulo: 'Não
 // Tag de status, aplicada por /vaga encerrar.
 export const TAG_ENCERRADA_ID = '1549751166152343633';
 
-// Opções do menu de menção do /anuncio, na ordem da seção 9.3.
+// Opções do menu de menção do /anuncio, na ordem em que aparecem.
 // Os cargos de momento de carreira não entram aqui: anúncio é para o servidor inteiro.
 // `id` só existe para cargo; @everyone e @here são menções do próprio Discord.
 export const MENCOES = [
@@ -126,8 +126,9 @@ export const MENCOES = [
 // As duas que notificam o servidor inteiro, e por isso ganham aviso na pré-visualização.
 export const MENCOES_AMPLAS = ['everyone', 'here'];
 
-// Reações que o bot pode deixar no anúncio recém-publicado (seção 9.7).
-// `caractere` é o que vai codificado na URL da API de reação.
+// Reações que o bot pode deixar no anúncio recém-publicado: a primeira reação serve de
+// convite para as membras responderem. `caractere` é o que vai codificado na URL da
+// API de reação; sem codificar, ela responde 10014 Unknown Emoji.
 export const REACOES = [
   { valor: 'nenhuma', rotulo: 'Nenhuma', descricao: 'Publica sem reagir' },
   { valor: 'roxo', rotulo: '💜', caractere: '💜', descricao: 'Carinho e apoio' },

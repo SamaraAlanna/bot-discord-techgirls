@@ -9,7 +9,8 @@
 //   texto      o resto, que aparece dentro do container, ou fora dele com `foraDoContainer`
 //
 // `maximo` é o max_length do campo, e o formulário avisa o limite na descrição.
-// Os valores cabem com folga numa mensagem V2 (seção 9.9), e um teste confere.
+// Cada máximo foi escolhido pelo destino mais apertado: um texto do card até 2.000
+// caracteres e a mensagem V2 inteira até 4.000. O teste do pior caso confere os dois.
 
 import { CURTO, PARAGRAFO } from './componentes/comum.js';
 

@@ -52,7 +52,7 @@ const FLUXO = 'anuncio';
  *
  * Não adianta procurar em `attachments`: arquivo apontado por um componente sai
  * dessa lista e ela volta vazia em toda resposta da API, inclusive logo depois do
- * envio que subiu o arquivo (seção 12). A galeria é o que sobra, e ela guarda o
+ * envio que subiu o arquivo. A galeria é o que sobra, e ela guarda o
  * endereço do CDN, que é mídia efêmera e o Worker consegue baixar.
  */
 function imagensAtuais(interacao) {
@@ -179,7 +179,6 @@ async function trocarImagens(interacao, modelo, atual, novas) {
   }
 }
 
-// Menus e botões da pré-visualização.
 export function tratarComponente(interacao, env, ctx) {
   const { acao, modelo: nome } = lerAcao(interacao.data?.custom_id);
   const modelo = acharModelo(nome);
@@ -192,7 +191,8 @@ export function tratarComponente(interacao, env, ctx) {
     return json({ type: TIPO_RESPOSTA.ATUALIZACAO_ADIADA });
   }
 
-  // O modal de imagens não depende do estado: responde direto, sem ler nada e sem rede.
+  // O modal precisa ser a resposta direta, dentro dos 3 segundos, e não depende do
+  // estado: responde na hora, sem ler nada e sem rede antes.
   if (acao === ACAO.EDITAR_IMAGENS) {
     return modal(montarModalImagens(modelo, interacao.id));
   }
@@ -204,7 +204,8 @@ export function tratarComponente(interacao, env, ctx) {
   }
 
   // Limpar e Voltar remontam o card com a galeria nos mesmos endereços, que é o que
-  // mantém as imagens na mensagem (seção 12). Limpar só troca os botões pela pergunta.
+  // mantém as imagens na mensagem sem repetir `attachments`. Limpar só troca os
+  // botões pela pergunta.
   if (acao === ACAO.LIMPAR || acao === ACAO.LIMPAR_VOLTAR) {
     ctx.waitUntil(atualizarPrevia(
       interacao,

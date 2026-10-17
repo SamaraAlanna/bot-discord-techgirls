@@ -1,11 +1,12 @@
-# Publica o Worker no Cloudflare a cada push na main (etapa 9 da seção 13).
+# Publica o Worker no Cloudflare a cada push na main.
 #
 # Dois jobs: os testes rodam primeiro e o deploy só começa se todos passarem
 # (`needs`). O token da Cloudflare só existe no job de deploy: o job de testes
 # nunca enxerga secret nenhum.
 #
 # Versões conferidas em 17/10/2026, na doc da Cloudflare (Workers > CI/CD > GitHub
-# Actions) e nas páginas de release de cada action (seção 12).
+# Actions) e nas páginas de release de cada action. As v4.1.0 e v4.1.1 da
+# wrangler-action saíram quebradas; a tag `v4` já aponta para uma versão boa.
 
 name: Deploy
 
