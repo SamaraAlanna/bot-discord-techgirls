@@ -66,7 +66,7 @@ export async function atualizarPrevia(interacao, componentes, extras = {}, fluxo
 
   try {
     await editarRespostaOriginal(interacao.application_id, interacao.token, corpo);
-    return;
+    return true;
   } catch (erro) {
     registrarFalha(fluxo, 'edição da pré-visualização', erro);
   }
@@ -74,12 +74,14 @@ export async function atualizarPrevia(interacao, componentes, extras = {}, fluxo
   try {
     await esperar(PAUSA_ANTES_DE_INSISTIR);
     await editarRespostaOriginal(interacao.application_id, interacao.token, corpo);
-    return;
+    return true;
   } catch (erro) {
     registrarFalha(fluxo, 'edição da pré-visualização, segunda tentativa', erro);
   }
 
   await avisarEmTextoSimples(interacao, fluxo);
+  // Devolve se o card entrou, para quem chama poder registrar a etapa com verdade.
+  return false;
 }
 
 /**

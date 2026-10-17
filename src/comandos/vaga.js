@@ -2,6 +2,7 @@
 
 import { respostaForaDoCanal } from '../canais.js';
 import { montarModal } from '../componentes/vaga-componentes.js';
+import { tratarApagar } from '../fluxos/vaga-apagar.js';
 import { tratarEncerrar } from '../fluxos/vaga-encerrar.js';
 import { mensagemEfemera, modal } from '../respostas.js';
 
@@ -12,8 +13,9 @@ export function comandoVaga(interacao, env, ctx) {
     // O id da interação deixa o formulário único a cada comando (seção 12).
     return respostaForaDoCanal(interacao, env, 'vaga nova') ?? modal(montarModal({}, interacao.id));
   }
-  // O encerrar tem a regra de canal dele: só dentro de um post do fórum de vagas.
+  // Encerrar e apagar têm a regra de canal deles: só dentro de um post do fórum de vagas.
   if (subcomando === 'encerrar') return tratarEncerrar(interacao, env, ctx);
+  if (subcomando === 'apagar') return tratarApagar(interacao, env, ctx);
 
   return mensagemEfemera('Não conheço esse subcomando, ele pode ter sido removido.');
 }

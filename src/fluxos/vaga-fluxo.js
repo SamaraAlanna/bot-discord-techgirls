@@ -28,6 +28,7 @@ import { registrarNoLog } from '../log.js';
 import { TIPO_RESPOSTA, json, mensagemEfemera, modal } from '../respostas.js';
 import { validarLink } from '../validacao.js';
 import { ID_FRASE, adiarMensagem, atualizarPrevia, concluirV2, registrarEtapa, registrarFalha } from './previa-v2.js';
+import { tratarComponenteDeApagar } from './vaga-apagar.js';
 
 // Pré-visualização inteira: a linha de apoio em cima e o card com os controles.
 const ID_APOIO = 8;
@@ -96,6 +97,12 @@ export function tratarEnvioDoModal(interacao, env, ctx) {
 export function tratarComponente(interacao, env, ctx) {
   const { acao } = lerAcao(interacao.data?.custom_id);
   const componentes = interacao.message?.components ?? [];
+
+  // Os botões da pergunta do /vaga apagar também começam com "vaga:", mas não
+  // pertencem à pré-visualização: o fluxo deles é outro.
+  if (acao === ACAO.APAGAR_CONFIRMAR || acao === ACAO.APAGAR_CANCELAR) {
+    return tratarComponenteDeApagar(interacao, env, ctx, acao);
+  }
 
   if (acao === ACAO.CANCELAR) {
     ctx.waitUntil(atualizarPrevia(interacao, [texto('Publicação cancelada.', ID_FRASE)], {}, FLUXO));

@@ -22,7 +22,7 @@ const SO_ADMIN = '0';
 const COMANDOS = [
   {
     name: 'vaga',
-    description: 'Publicar ou encerrar uma vaga no fórum',
+    description: 'Publicar, encerrar ou apagar uma vaga no fórum',
     type: CHAT_INPUT,
     default_member_permissions: SO_ADMIN,
     options: [
@@ -35,6 +35,11 @@ const COMANDOS = [
         type: SUBCOMANDO,
         name: 'encerrar',
         description: 'Encerrar a vaga deste post: aplica a tag, tranca e arquiva',
+      },
+      {
+        type: SUBCOMANDO,
+        name: 'apagar',
+        description: 'Apagar o post desta vaga, depois de confirmar. Não tem volta',
       },
     ],
   },

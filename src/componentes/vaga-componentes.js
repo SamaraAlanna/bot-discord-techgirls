@@ -39,10 +39,32 @@ export const ACAO = {
   LIMPAR: 'limpar',
   LIMPAR_CONFIRMAR: 'limpar-confirmar',
   LIMPAR_VOLTAR: 'limpar-voltar',
+  // Botões da pergunta do /vaga apagar, tratados em fluxos/vaga-apagar.js.
+  APAGAR_CONFIRMAR: 'apagar-confirmar',
+  APAGAR_CANCELAR: 'apagar-cancelar',
 };
 
 // A pergunta toma o lugar da linha de apoio enquanto a admin decide.
 export const PERGUNTA_DE_LIMPEZA = 'Limpar todos os campos da vaga? As escolhas dos menus continuam.';
+
+/**
+ * Pergunta do /vaga apagar: o título da vaga, o aviso de que não tem volta e, se a
+ * vaga ainda estiver aberta, o aviso disso. Quem apaga é o botão, nunca o comando.
+ */
+export function montarPerguntaDeApagar({ titulo, encerrada }) {
+  const linhas = [`Apagar a vaga **${titulo}**? O post e todas as respostas somem, e isso não tem volta.`];
+  if (!encerrada) {
+    linhas.push('Atenção: essa vaga ainda está aberta, sem a tag Encerrada. Se ela só acabou, o /vaga encerrar guarda o histórico.');
+  }
+
+  return [
+    texto(linhas.join('\n'), ID_FRASE),
+    linha([
+      botao({ id: idDaAcao(ACAO.APAGAR_CONFIRMAR), rotulo: 'Apagar', estilo: BOTAO_VERMELHO }),
+      botao({ id: idDaAcao(ACAO.APAGAR_CANCELAR), rotulo: 'Cancelar' }),
+    ]),
+  ];
+}
 
 // O terceiro pedaço, quando existe, é só para deixar o custom_id único: a leitura o ignora.
 export const idDaAcao = (acao, unico) => (unico ? `vaga:${acao}:${unico}` : `vaga:${acao}`);

@@ -59,6 +59,14 @@ export function buscarCanal(canalId, token) {
   return chamarDiscord('GET', `/channels/${canalId}`, { token });
 }
 
+/**
+ * Apaga um canal ou uma thread, como um post de fórum. Não tem volta: a doc diz
+ * "Deleting a guild channel cannot be undone". Thread pede MANAGE_THREADS (seção 12).
+ */
+export function apagarCanal(canalId, token) {
+  return chamarDiscord('DELETE', `/channels/${canalId}`, { token });
+}
+
 // Tags, trancado e arquivado de uma thread vivem no próprio canal.
 export function editarCanal(canalId, corpo, token) {
   return chamarDiscord('PATCH', `/channels/${canalId}`, { token, corpo });
