@@ -35,9 +35,17 @@ export const ACAO = {
   PUBLICAR: 'publicar',
   CANCELAR: 'cancelar',
   FUNCAO: 'funcao',
+  // Limpar só pergunta; quem esvazia é o Confirmar, e o Voltar desfaz a pergunta.
+  LIMPAR: 'limpar',
+  LIMPAR_CONFIRMAR: 'limpar-confirmar',
+  LIMPAR_VOLTAR: 'limpar-voltar',
 };
 
-export const idDaAcao = (acao) => `vaga:${acao}`;
+// A pergunta toma o lugar da linha de apoio enquanto a admin decide.
+export const PERGUNTA_DE_LIMPEZA = 'Limpar todos os campos da vaga? As escolhas dos menus continuam.';
+
+// O terceiro pedaço, quando existe, é só para deixar o custom_id único: a leitura o ignora.
+export const idDaAcao = (acao, unico) => (unico ? `vaga:${acao}:${unico}` : `vaga:${acao}`);
 
 export function lerAcao(customId) {
   const [, acao] = String(customId ?? '').split(':');
@@ -93,33 +101,64 @@ export const SELECOES = [
 // O título do cargo vira o nome do post no fórum, que aceita de 1 a 100 caracteres.
 export const MAXIMO_TITULO = 100;
 
-export function montarModal(valores = {}) {
-  const campo = (id, rotulo, estilo, obrigatorio, maximo, extras = {}) => campoDeTexto({
-    rotulo, id, estilo, obrigatorio, maximo,
+/**
+ * Limite de cada campo do formulário (seção 9.9). Quem aperta é o texto simples
+ * que cria o post, porque `content` aceita até 2000 caracteres e leva tudo junto:
+ * menção, título, empresa, descrição, escolhas, local e link. Um teste monta o pior
+ * caso com estes valores e confere que cabe.
+ */
+export const MAXIMOS = {
+  titulo: MAXIMO_TITULO,
+  empresa: 100,
+  // O destino do botão aceita até 512.
+  link: 500,
+  local: 100,
+  descricao: 1000,
+};
+
+// Campos sem os quais não dá para publicar.
+const OBRIGATORIOS = [
+  { chave: 'titulo', nome: 'título do cargo' },
+  { chave: 'empresa', nome: 'empresa' },
+  { chave: 'link', nome: 'link' },
+];
+
+// `unico` entra no custom_id para cada formulário aberto ser diferente do anterior.
+export function montarModal(valores = {}, unico = null) {
+  const campo = (id, rotulo, estilo, obrigatorio, extras = {}) => campoDeTexto({
+    rotulo, id, estilo, obrigatorio, maximo: MAXIMOS[id],
     ...extras,
     ...(valores[id] ? { valor: valores[id] } : {}),
   });
 
   return {
-    custom_id: idDaAcao(ACAO.MODAL),
+    custom_id: idDaAcao(ACAO.MODAL, unico),
     title: 'Nova vaga',
     components: [
-      campo('titulo', 'Título do cargo', CURTO, true, MAXIMO_TITULO, { exemplo: 'Pessoa Desenvolvedora Back-end' }),
-      campo('empresa', 'Empresa', CURTO, true, 100),
-      campo('link', 'Link da vaga', CURTO, true, 500, {
+      campo('titulo', 'Título do cargo', CURTO, true, { exemplo: 'Pessoa Desenvolvedora Back-end' }),
+      campo('empresa', 'Empresa', CURTO, true),
+      campo('link', 'Link da vaga', CURTO, true, {
         descricao: 'Precisa começar com https://.',
         exemplo: 'https://',
       }),
-      campo('local', 'Localização (opcional)', CURTO, false, 100, {
+      campo('local', 'Localização (opcional)', CURTO, false, {
         descricao: 'Opcional para remoto. Se for híbrido ou presencial, informe a cidade.',
         exemplo: 'São Paulo, SP',
       }),
-      campo('descricao', 'Descrição curta (opcional)', PARAGRAFO, false, 1500, {
+      campo('descricao', 'Descrição curta (opcional)', PARAGRAFO, false, {
         descricao: 'O suficiente para decidir se vale candidatar-se.',
       }),
     ],
   };
 }
+
+/** Os obrigatórios que estão vazios, no jeito de escrever numa frase. */
+export const faltaPreencher = (valores = {}) => OBRIGATORIOS.filter((campo) => !valores[campo.chave]).map((campo) => campo.nome);
+
+/** Rascunho sem nada escrito, como fica depois do Limpar. */
+export const estaEmBranco = (valores = {}) => Object.keys(MAXIMOS).every((chave) => !valores[chave]);
+
+export const RASCUNHO_EM_BRANCO = Object.freeze({ titulo: '', empresa: '', link: '', local: '', descricao: '' });
 
 const rotuloDaEscolha = (lista, valor) => lista.find((item) => item.valor === valor)?.rotulo ?? SEM_ESCOLHA;
 
@@ -144,8 +183,18 @@ export function rotuloDoBotao(dominio) {
  * `controles` liga os menus e botões da pré-visualização.
  * `cargos` são os mencionados acima do card. Por padrão saem das escolhas; na
  * publicação vêm já conferidos contra os cargos que existem no servidor.
+ * `confirmandoLimpeza` troca os botões por Confirmar e Voltar e trava os menus. O
+ * card e os menus continuam na mensagem porque são eles que guardam o estado: é
+ * deles que o Voltar remonta a pré-visualização.
  */
-export function montarCartao({ valores, escolhas = {}, autora, controles = true, cargos = cargosDaVaga(escolhas).cargos }) {
+export function montarCartao({
+  valores,
+  escolhas = {},
+  autora,
+  controles = true,
+  confirmandoLimpeza = false,
+  cargos = cargosDaVaga(escolhas).cargos,
+}) {
   const dentro = SELECOES.map((selecao) => linhaDeDado(
     selecao.marca,
     selecao.rotulo,
@@ -166,33 +215,51 @@ export function montarCartao({ valores, escolhas = {}, autora, controles = true,
   const cartao = [];
   // A menção fica acima de tudo, fora do container, como no /anuncio.
   if (cargos.length) cartao.push(texto(textoDaMencao(cargos), IDS.MENCAO));
-  cartao.push(
-    texto(`# 💼 ${valores.titulo}`, IDS.TITULO),
-    texto(`**${valores.empresa}**`, IDS.EMPRESA),
-  );
+  // Rascunho limpo não tem título nem empresa: as linhas somem em vez de virar
+  // texto vazio, que o Discord recusa.
+  if (valores.titulo) cartao.push(texto(`# 💼 ${valores.titulo}`, IDS.TITULO));
+  if (valores.empresa) cartao.push(texto(`**${valores.empresa}**`, IDS.EMPRESA));
   if (valores.descricao) cartao.push(texto(valores.descricao, IDS.DESCRICAO));
   cartao.push(container(CORES.VAGA, dentro, IDS.CONTAINER));
 
   if (!controles) return cartao;
 
+  // Menu travado continua com a opção marcada como `default`, então a leitura não muda.
   const menus = SELECOES.map((selecao) => menuDeSelecao({
     id: idDaAcao(selecao.acao),
     convite: selecao.convite,
     opcoes: opcoesDaLista(selecao.lista, escolhas[selecao.chave]),
+    desabilitado: confirmandoLimpeza,
   }));
   // A função depende da área, então o menu dela vem logo depois do da área.
-  menus.splice(1, 0, menuDeFuncao(escolhas));
+  menus.splice(1, 0, menuDeFuncao(escolhas, confirmandoLimpeza));
+
+  if (confirmandoLimpeza) {
+    return [
+      ...cartao,
+      ...menus,
+      linha([
+        botao({ id: idDaAcao(ACAO.LIMPAR_CONFIRMAR), rotulo: 'Confirmar', estilo: BOTAO_VERMELHO }),
+        botao({ id: idDaAcao(ACAO.LIMPAR_VOLTAR), rotulo: 'Voltar' }),
+      ]),
+    ];
+  }
+
+  const emBranco = estaEmBranco(valores);
 
   return [
     ...cartao,
     ...menus,
     linha([
+      // O /vaga não tem Editar texto: sem este botão, um rascunho limpo seria um beco.
+      ...(emBranco ? [botao({ id: idDaAcao(ACAO.CORRIGIR), rotulo: 'Preencher', estilo: BOTAO_VERDE })] : []),
       botao({
         id: idDaAcao(ACAO.PUBLICAR),
         rotulo: 'Publicar',
         estilo: BOTAO_VERDE,
-        desabilitado: faltaEscolher(escolhas).length > 0,
+        desabilitado: faltaEscolher(escolhas).length > 0 || faltaPreencher(valores).length > 0,
       }),
+      botao({ id: idDaAcao(ACAO.LIMPAR), rotulo: 'Limpar', desabilitado: emBranco }),
       botao({ id: idDaAcao(ACAO.CANCELAR), rotulo: 'Cancelar', estilo: BOTAO_VERMELHO }),
     ]),
   ];
@@ -299,15 +366,19 @@ export function recolorir(componentes, cor) {
 
 // Linha de apoio acima do card, que vai encurtando conforme as escolhas são feitas.
 // Com a área escolhida, diz também quem vai ser avisada, para a admin conferir.
-export function textoDaPrevia(escolhas = {}) {
+export function textoDaPrevia(escolhas = {}, valores = null) {
   const falta = faltaEscolher(escolhas);
-  const primeira = falta.length
-    ? `Confira como vai ficar e escolha ainda: ${falta.join(', ')}.`
-    : 'Confira como vai ficar e publique quando estiver boa.';
+  let primeira;
+  if (valores && estaEmBranco(valores)) {
+    primeira = 'Rascunho em branco. Toque em Preencher para escrever a vaga de novo.';
+  } else if (falta.length) {
+    primeira = `Confira como vai ficar e escolha ainda: ${falta.join(', ')}.`;
+  } else {
+    primeira = 'Confira como vai ficar e publique quando estiver boa.';
+  }
 
   if (!escolhas.area) return primeira;
-  return `${primeira}
-${textoDeQuemSeraAvisada(cargosDaVaga(escolhas))}`;
+  return `${primeira}\n${textoDeQuemSeraAvisada(cargosDaVaga(escolhas))}`;
 }
 
 function textoDeQuemSeraAvisada({ cargos, semCargo }) {
@@ -335,13 +406,13 @@ export function funcaoDaArea(area, funcao) {
 }
 
 // Só lista as funções da área escolhida. Sem área, fica travado com a opção padrão.
-function menuDeFuncao(escolhas) {
+function menuDeFuncao(escolhas, travado = false) {
   const funcoes = funcoesDaArea(escolhas.area);
   return menuDeSelecao({
     id: idDaAcao(ACAO.FUNCAO),
     convite: funcoes.length ? 'Qual é a função? (opcional)' : 'Escolha a área primeiro.',
     opcoes: opcoesDaLista([FUNCAO_NAO_ESPECIFICADA, ...funcoes], funcaoDaArea(escolhas.area, escolhas.funcao)),
-    desabilitado: !funcoes.length,
+    desabilitado: travado || !funcoes.length,
   });
 }
 

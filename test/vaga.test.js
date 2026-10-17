@@ -90,8 +90,10 @@ const VAGA = {
 
 const ESCOLHAS = { area: 'desenvolvimento', senioridade: 'pleno', modalidade: 'remoto' };
 
-const comando = (subcomando) => ({
-  type: 2, application_id: 'APP', token: 'tok', guild_id: 'G1', member: MEMBRO,
+// O /vaga nova só roda no canal de log (CANAIS_PERMITIDOS), então o comando vem de lá.
+const comando = (subcomando, canal = 'CL', id = 'INTER1') => ({
+  type: 2, id, application_id: 'APP', token: 'tok', guild_id: 'G1', member: MEMBRO,
+  channel: { id: canal, type: 0 }, channel_id: canal,
   data: { name: 'vaga', options: [{ name: subcomando, type: 1 }] },
 });
 
@@ -179,7 +181,10 @@ describe('comando', () => {
     const modal = (await responder(comando('nova'))).data;
     const local = modal.components.find((label) => label.component.custom_id === 'local');
 
-    assert.equal(local.description, 'Opcional para remoto. Se for híbrido ou presencial, informe a cidade.');
+    assert.equal(
+      local.description,
+      'Opcional para remoto. Se for híbrido ou presencial, informe a cidade. Até 100 caracteres.',
+    );
   });
 
   test('subcomando desconhecido não quebra', async () => {
@@ -869,6 +874,143 @@ describe('menção no post', () => {
 
     assert.deepEqual(api.post().corpo.message.allowed_mentions.roles, [DEV, BACK]);
     assert.match(registrado, /\[vaga\] falhou em conferência dos cargos/);
+  });
+});
+
+describe('limpar', () => {
+  const ESCOLHAS_COM_FUNCAO = { area: 'dados', funcao: 'ciencia-dados', senioridade: 'pleno', modalidade: 'remoto' };
+  const botao = (componentes, rotulo) => botoes(componentes).find((item) => item.label === rotulo);
+  const escolhida = (componentes, acao) => menu(componentes, acao).options.find((o) => o.default)?.value;
+
+  // Limpar pergunta; o Confirmar é que esvazia.
+  async function perguntando() {
+    espionarApi();
+    const card = await cartaoCompleto(VAGA, ESCOLHAS_COM_FUNCAO);
+    const pergunta = await cliqueEEdicao('limpar', card);
+    return { card, ...pergunta };
+  }
+
+  async function limpo() {
+    const { componentes } = await perguntando();
+    return cliqueEEdicao('limpar-confirmar', { components: componentes });
+  }
+
+  test('a pré-visualização tem Limpar entre Publicar e Cancelar', async () => {
+    espionarApi();
+    const card = await cartaoCompleto();
+    assert.deepEqual(
+      botoes(card.components).filter((item) => item.custom_id).map((item) => item.label),
+      ['Publicar', 'Limpar', 'Cancelar'],
+    );
+    assert.equal(botao(card.components, 'Limpar').disabled, false);
+  });
+
+  describe('confirmação', () => {
+    test('Limpar só pergunta: mostra a pergunta com Confirmar e Voltar', async () => {
+      const { resposta, componentes } = await perguntando();
+
+      assert.equal(resposta.type, 6);
+      assert.equal(textos(componentes)[0], 'Limpar todos os campos da vaga? As escolhas dos menus continuam.');
+      assert.deepEqual(
+        botoes(componentes).filter((item) => item.custom_id).map((item) => [item.label, item.custom_id]),
+        [['Confirmar', 'vaga:limpar-confirmar'], ['Voltar', 'vaga:limpar-voltar']],
+      );
+    });
+
+    test('enquanto pergunta, nada é apagado: o card continua inteiro', async () => {
+      const { card, componentes } = await perguntando();
+
+      for (const id of [1, 2, 3, 13, 14]) {
+        assert.deepEqual(porIdDoComponente(componentes, id), porIdDoComponente(card.components, id), `id ${id} igual`);
+      }
+      assert.equal(botoes(componentes).find((item) => item.style === 5).url, VAGA.link, 'o link continua');
+    });
+
+    test('enquanto pergunta, os menus ficam travados sem perder a escolha', async () => {
+      const { componentes } = await perguntando();
+
+      for (const acao of ['area', 'funcao', 'senioridade', 'modalidade']) assert.equal(menu(componentes, acao).disabled, true, acao);
+      assert.equal(escolhida(componentes, 'area'), 'dados');
+      assert.equal(escolhida(componentes, 'funcao'), 'ciencia-dados');
+    });
+
+    test('Voltar devolve a pré-visualização exatamente como estava', async () => {
+      const { card, componentes } = await perguntando();
+      const { resposta, componentes: devolvida } = await cliqueEEdicao('limpar-voltar', { components: componentes });
+
+      assert.equal(resposta.type, 6);
+      assert.deepEqual(devolvida, card.components);
+    });
+  });
+
+  test('Confirmar adia, edita pelo webhook e esvazia todos os campos', async () => {
+    const { resposta, componentes } = await limpo();
+
+    assert.equal(resposta.type, 6);
+    for (const id of [1, 2, 3, 13]) assert.equal(porIdDoComponente(componentes, id), null, `id ${id} some`);
+    assert.equal(botoes(componentes).some((item) => item.style === 5), false, 'sem link, sem botão Candidatar-se');
+    assert.match(textos(componentes)[0], /^Rascunho em branco\. Toque em Preencher/);
+  });
+
+  test('não cancela: as escolhas dos menus continuam', async () => {
+    const { componentes } = await limpo();
+
+    assert.equal(escolhida(componentes, 'area'), 'dados');
+    assert.equal(escolhida(componentes, 'funcao'), 'ciencia-dados');
+    assert.equal(escolhida(componentes, 'senioridade'), 'pleno');
+    assert.equal(escolhida(componentes, 'modalidade'), 'remoto');
+    assert.equal(porTipo(componentes, 17).length, 1, 'o card continua lá');
+  });
+
+  test('em branco: Preencher aparece, Publicar e Limpar travam', async () => {
+    const { componentes } = await limpo();
+
+    assert.deepEqual(
+      botoes(componentes).filter((item) => item.custom_id).map((item) => item.label),
+      ['Preencher', 'Publicar', 'Limpar', 'Cancelar'],
+    );
+    assert.equal(botao(componentes, 'Publicar').disabled, true);
+    assert.equal(botao(componentes, 'Limpar').disabled, true);
+  });
+
+  test('Preencher abre o formulário vazio', async () => {
+    const { componentes } = await limpo();
+    const resposta = await responder(clique('corrigir', { components: componentes }));
+
+    assert.equal(resposta.type, 9);
+    assert.deepEqual(resposta.data.components.map((label) => label.component.value).filter(Boolean), []);
+  });
+
+  test('o formulário enviado do rascunho limpo atualiza no lugar e mantém as escolhas', async () => {
+    const { componentes } = await limpo();
+    const envio = { ...envioDoModal({ ...VAGA, titulo: 'Cientista de Dados' }), message: { components: componentes } };
+
+    const resposta = await responder(envio);
+    await esperarPendentes();
+    const atualizada = ultimaPrevia().components;
+
+    assert.equal(resposta.type, 6, 'atualiza a mesma mensagem');
+    assert.equal(porIdDoComponente(atualizada, 1).content, '# 💼 Cientista de Dados');
+    assert.equal(escolhida(atualizada, 'area'), 'dados');
+    assert.equal(escolhida(atualizada, 'funcao'), 'ciencia-dados');
+    assert.equal(botao(atualizada, 'Publicar').disabled, false);
+    assert.equal(botao(atualizada, 'Preencher'), undefined, 'com texto, o Preencher sai');
+  });
+
+  test('publicar um rascunho em branco não cria post nenhum', async () => {
+    const { componentes } = await limpo();
+    const original = console.error;
+    console.error = () => {};
+    let resposta;
+    try {
+      resposta = await responder(clique('publicar', { components: componentes }));
+      await esperarPendentes();
+    } finally {
+      console.error = original;
+    }
+
+    assert.match(resposta.data.content, /O rascunho está incompleto/);
+    assert.equal(ultimasChamadas.some((c) => c.url.includes('/threads')), false);
   });
 });
 

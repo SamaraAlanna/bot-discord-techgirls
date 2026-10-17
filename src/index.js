@@ -71,7 +71,7 @@ export async function rotear(interacao, env, ctx) {
 function rotearComando(interacao, env, ctx) {
   const nome = interacao.data?.name;
 
-  if (nome === 'anuncio') return comandoAnuncio(interacao);
+  if (nome === 'anuncio') return comandoAnuncio(interacao, env);
   if (nome === 'vaga') return comandoVaga(interacao, env, ctx);
 
   return mensagemEfemera('Não conheço esse comando, ele pode ter sido removido.');

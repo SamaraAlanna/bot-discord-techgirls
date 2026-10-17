@@ -32,9 +32,17 @@ export const ACAO = {
   PUBLICAR: 'publicar',
   CANCELAR: 'cancelar',
   CORRIGIR: 'corrigir',
+  // Limpar só pergunta; quem esvazia é o Confirmar, e o Voltar desfaz a pergunta.
+  LIMPAR: 'limpar',
+  LIMPAR_CONFIRMAR: 'limpar-confirmar',
+  LIMPAR_VOLTAR: 'limpar-voltar',
 };
 
-export const idDaAcao = (acao, modelo) => `anuncio:${acao}:${modelo}`;
+// A pergunta toma o lugar da linha de apoio enquanto a admin decide.
+export const PERGUNTA_DE_LIMPEZA = 'Limpar todos os campos e as imagens? Menção e reação continuam.';
+
+// O quarto pedaço, quando existe, é só para deixar o custom_id único: a leitura o ignora.
+export const idDaAcao = (acao, modelo, unico) => `anuncio:${acao}:${modelo}${unico ? `:${unico}` : ''}`;
 
 export function lerAcao(customId) {
   const [, acao, modelo] = String(customId ?? '').split(':');
@@ -42,8 +50,9 @@ export function lerAcao(customId) {
 }
 
 // Ids numéricos dos componentes do card, fixos por posição.
-// Fora do container vêm menção, título e descrição; dentro, os dados do modelo,
-// a galeria, o botão e a autora no fim.
+// Fora do container vêm menção, título, descrição e os campos marcados com
+// `foraDoContainer` (o desconto e o cupom da parceria); dentro, os outros dados do
+// modelo, a galeria, o botão e a autora no fim.
 export const IDS = {
   MENCAO: 1,
   TITULO: 2,
@@ -61,10 +70,13 @@ export const IDS = {
 // Campo do modal de imagens.
 export const CAMPO_IMAGENS = 'imagens';
 
-/** Formulário do modelo, já preenchido quando é edição. */
-export function montarModalTexto(modelo, valores = {}) {
+/**
+ * Formulário do modelo, já preenchido quando é edição.
+ * `unico` entra no custom_id para cada formulário aberto ser diferente do anterior.
+ */
+export function montarModalTexto(modelo, valores = {}, unico = null) {
   return {
-    custom_id: idDaAcao(ACAO.MODAL_TEXTO, modelo.valor),
+    custom_id: idDaAcao(ACAO.MODAL_TEXTO, modelo.valor, unico),
     title: modelo.tituloDoModal,
     components: modelo.campos.map((campo) => campoDeTexto({
       rotulo: campo.rotulo,
@@ -85,9 +97,9 @@ export function montarModalTexto(modelo, valores = {}) {
  * Nada de menu de remoção: ele era o único componente novo neste modal quando o
  * Discord passou a recusar a tela (seção 12).
  */
-export function montarModalImagens(modelo) {
+export function montarModalImagens(modelo, unico = null) {
   return {
-    custom_id: idDaAcao(ACAO.MODAL_IMAGENS, modelo.valor),
+    custom_id: idDaAcao(ACAO.MODAL_IMAGENS, modelo.valor, unico),
     title: 'Imagens do anúncio',
     components: [
       campoDeUpload({
@@ -109,8 +121,10 @@ const prefixoDoCampo = (campo) => `${campo.marca} **${campo.nome}:** `;
 function linhaDoCampo(campo, valor, posicao) {
   const id = IDS.campo(posicao);
 
+  // O código vai sozinho num bloco de código, que facilita copiar. A crase tripla fica
+  // em linhas próprias: colada no código, a primeira palavra viraria nome de linguagem.
   if (campo.formato === 'cupom') {
-    return texto(`🎟️ **Use o código**\n\`\`\`\n${valor}\n\`\`\``, id);
+    return texto(`\`\`\`\n${valor}\n\`\`\``, id);
   }
   if (campo.papel === 'data') {
     // No card de erro a data pode estar ainda como a admin digitou, porque a
@@ -128,11 +142,26 @@ function linhaDoCampo(campo, valor, posicao) {
  * Card do anúncio. `controles` liga os menus e botões da pré-visualização.
  * A menção fica num texto acima do container: numa mensagem V2 não existe `content`,
  * então é esse texto que notifica.
+ * `confirmandoLimpeza` troca os botões por Confirmar e Voltar e trava os menus. O
+ * card, a galeria e os menus continuam na mensagem porque são eles que guardam o
+ * estado: é deles que o Voltar remonta a pré-visualização.
  */
-export function montarCartao({ modelo, valores, imagens = [], autora, escolha, reacao, controles = true }) {
-  const dentro = camposDoCard(modelo)
-    .map((campo, posicao) => (valores[campo.id] ? linhaDoCampo(campo, valores[campo.id], posicao) : null))
+export function montarCartao({
+  modelo,
+  valores,
+  imagens = [],
+  autora,
+  escolha,
+  reacao,
+  controles = true,
+  confirmandoLimpeza = false,
+}) {
+  // A posição em `ordemNoCard` define o id, esteja o campo dentro ou fora do container.
+  const linhas = camposDoCard(modelo)
+    .map((campo, posicao) => (valores[campo.id] ? { campo, linha: linhaDoCampo(campo, valores[campo.id], posicao) } : null))
     .filter(Boolean);
+  const fora = linhas.filter((item) => item.campo.foraDoContainer).map((item) => item.linha);
+  const dentro = linhas.filter((item) => !item.campo.foraDoContainer).map((item) => item.linha);
 
   if (imagens.length) dentro.push(galeria(imagens, IDS.GALERIA));
 
@@ -152,43 +181,77 @@ export function montarCartao({ modelo, valores, imagens = [], autora, escolha, r
     cartao.push(texto(mencao.id ? `<@&${mencao.id}>` : mencao.rotulo, IDS.MENCAO));
   }
 
-  // Fora do container: título e descrição, nesta ordem.
-  cartao.push(texto(`# ${valores.titulo}`, IDS.TITULO));
+  // Fora do container: título, descrição e os campos que moram fora, nesta ordem.
+  // Rascunho limpo não tem título: a linha some em vez de virar um "# " vazio.
+  if (valores.titulo) cartao.push(texto(`# ${valores.titulo}`, IDS.TITULO));
 
   const campoDeDescricao = campoPorPapel(modelo, 'descricao');
   if (campoDeDescricao && valores[campoDeDescricao.id]) {
     cartao.push(texto(valores[campoDeDescricao.id], IDS.DESCRICAO));
   }
 
+  cartao.push(...fora);
   cartao.push(container(CORES.ANUNCIO, dentro, IDS.CONTAINER));
 
   if (!controles) return cartao;
 
-  return [
-    ...cartao,
+  // Menu travado continua com a opção marcada como `default`, então a leitura não muda.
+  const menus = [
     menuDeSelecao({
       id: idDaAcao(ACAO.MENCAO, modelo.valor),
       convite: 'Quem deve ser avisada?',
       opcoes: opcoesDaLista(MENCOES, escolha),
+      desabilitado: confirmandoLimpeza,
     }),
     menuDeSelecao({
       id: idDaAcao(ACAO.REACAO, modelo.valor),
       convite: 'Deixo alguma reação no anúncio?',
       opcoes: opcoesDaLista(REACOES, reacao ?? REACAO_PADRAO),
+      desabilitado: confirmandoLimpeza,
     }),
+  ];
+
+  if (confirmandoLimpeza) {
+    return [
+      ...cartao,
+      ...menus,
+      linha([
+        botao({ id: idDaAcao(ACAO.LIMPAR_CONFIRMAR, modelo.valor), rotulo: 'Confirmar', estilo: BOTAO_VERMELHO }),
+        botao({ id: idDaAcao(ACAO.LIMPAR_VOLTAR, modelo.valor), rotulo: 'Voltar' }),
+      ]),
+    ];
+  }
+
+  const emBranco = estaEmBranco(modelo, valores) && !imagens.length;
+
+  return [
+    ...cartao,
+    ...menus,
     linha([
       botao({ id: idDaAcao(ACAO.EDITAR_TEXTO, modelo.valor), rotulo: 'Editar texto' }),
-      botao({ id: idDaAcao(ACAO.EDITAR_IMAGENS, modelo.valor), rotulo: 'Editar imagens' }),
+      // A ação continua "editar-imagens": muda só o rótulo, e uma pré-visualização
+      // aberta antes da troca segue funcionando. "Trocar" porque o que for enviado
+      // substitui todas as imagens.
+      botao({ id: idDaAcao(ACAO.EDITAR_IMAGENS, modelo.valor), rotulo: 'Trocar imagens' }),
       botao({
         id: idDaAcao(ACAO.PUBLICAR, modelo.valor),
         rotulo: 'Publicar',
         estilo: BOTAO_VERDE,
-        desabilitado: !escolha,
+        desabilitado: !escolha || faltaPreencher(modelo, valores).length > 0,
       }),
+      botao({ id: idDaAcao(ACAO.LIMPAR, modelo.valor), rotulo: 'Limpar', desabilitado: emBranco }),
       botao({ id: idDaAcao(ACAO.CANCELAR, modelo.valor), rotulo: 'Cancelar', estilo: BOTAO_VERMELHO }),
     ]),
   ];
 }
+
+/** Rótulos dos obrigatórios que estão vazios. */
+export const faltaPreencher = (modelo, valores = {}) => modelo.campos
+  .filter((campo) => campo.obrigatorio && !valores[campo.id])
+  .map((campo) => campo.rotulo.toLowerCase());
+
+/** Nenhum campo do modelo tem texto, como fica depois do Limpar. */
+export const estaEmBranco = (modelo, valores = {}) => modelo.campos.every((campo) => !valores[campo.id]);
 
 // O card tem galeria? Serve para saber se há o que remover, sem precisar dos nomes.
 export function temGaleria(componentes) {
@@ -239,7 +302,12 @@ export function lerCartao(modelo, componentes) {
     if (conteudo === null) return;
 
     if (campo.formato === 'cupom') {
-      valores[campo.id] = conteudo.replace(/^[^\n]*\n```\n?/, '').replace(/\n?```$/, '');
+      // Lê o formato atual (só o bloco) e o antigo, que tinha "🎟️ **Use o código**"
+      // numa linha antes do bloco, para uma pré-visualização aberta antes da troca.
+      valores[campo.id] = conteudo
+        .replace(/^(?!```)[^\n]*\n/, '')
+        .replace(/^```\n?/, '')
+        .replace(/\n?```$/, '');
       return;
     }
     if (campo.papel === 'data') {
@@ -306,11 +374,16 @@ export function emojiDaReacao(reacao) {
 }
 
 // Linha de apoio acima do card, com o aviso das menções que alcançam o servidor.
-export function textoDaPrevia(escolha) {
-  if (!MENCOES_AMPLAS.includes(escolha)) {
-    return 'Confira como vai ficar e escolha quem deve ser avisada.';
-  }
-  return escolha === 'here'
+// Com o rascunho em branco, ela diz como recomeçar, sem perder o aviso.
+export function textoDaPrevia(escolha, { emBranco = false } = {}) {
+  const aviso = escolha === 'here'
     ? 'Atenção: isso vai notificar todas as pessoas que estão online agora.'
     : 'Atenção: isso vai notificar todas as pessoas do servidor.';
+  const ampla = MENCOES_AMPLAS.includes(escolha);
+
+  if (emBranco) {
+    const recomeco = 'Rascunho em branco. Toque em Editar texto para escrever o anúncio de novo.';
+    return ampla ? `${recomeco}\n${aviso}` : recomeco;
+  }
+  return ampla ? aviso : 'Confira como vai ficar e escolha quem deve ser avisada.';
 }

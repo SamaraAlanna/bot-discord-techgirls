@@ -103,8 +103,10 @@ const AVISO = {
   quando: '',
 };
 
-const comando = (modelo) => ({
-  type: 2, application_id: 'APP', token: 'tok', guild_id: 'G1', member: MEMBRO,
+// O /anuncio só roda no canal de log (CANAIS_PERMITIDOS), então o comando vem de lá.
+const comando = (modelo, canal = 'CL') => ({
+  type: 2, id: 'INTER1', application_id: 'APP', token: 'tok', guild_id: 'G1', member: MEMBRO,
+  channel: { id: canal, type: 0 }, channel_id: canal,
   data: { name: 'anuncio', options: [{ name: modelo, type: 1 }] },
 });
 
@@ -201,6 +203,9 @@ const clique = (acao, modelo, mensagem, values) => ({
 const responder = async (interacao) => JSON.parse(await (await rotear(interacao, env, ctx)).text());
 
 const mensagemDe = (resposta, anexos = []) => ({ components: resposta.data.components, attachments: anexos });
+
+// Valor pré-preenchido de um campo, num modal devolvido pelo bot.
+const valorDoCampo = (resposta, id) => resposta.data.components.find((label) => label.component.custom_id === id)?.component.value;
 
 // Leitura da árvore de componentes.
 const achar = (componentes, aceita, achados = []) => {
@@ -346,13 +351,38 @@ describe('pré-visualização em V2', () => {
     assert.equal(porIdDoComponente(resposta.data.components, 3).content, 'Conversa aberta sobre transição.');
   });
 
-  test('parceria: descrição fora, desconto e cupom dentro', async () => {
+  test('parceria: desconto e cupom fora do container, logo abaixo da descrição', async () => {
     const { resposta } = await previaPronta('parceria', PARCERIA);
-    const caixa = porTipo(resposta.data.components, 17)[0];
+    const componentes = resposta.data.components;
+    const soltos = componentes.filter((item) => item.type === 10).map((item) => item.id);
 
-    assert.equal(porIdDoComponente(resposta.data.components, 3).content, 'Cursos com desconto para a comunidade.');
-    assert.equal(porIdDoComponente(caixa.components, 10).content, '20% até 30/11');
-    assert.equal(porIdDoComponente(caixa.components, 11).content, ['🎟️ **Use o código**', '```', 'TECHGIRLS20', '```'].join('\n'));
+    // Apoio, título, descrição, desconto e cupom, nesta ordem, antes do container.
+    assert.deepEqual(soltos, [8, 2, 3, 10, 11]);
+    assert.ok(componentes.findIndex((item) => item.id === 11) < componentes.findIndex((item) => item.type === 17));
+    assert.equal(porIdDoComponente(componentes, 10).content, '20% até 30/11', 'desconto em texto normal');
+    assert.equal(porIdDoComponente(componentes, 11).content, '```\nTECHGIRLS20\n```', 'só o bloco de código');
+    assert.doesNotMatch(JSON.stringify(componentes), /🎟️|Use o código/, 'sem o emoji de bilhete');
+  });
+
+  test('parceria: dentro do container ficam só galeria, botão e assinatura', async () => {
+    espionarApi();
+    const card = await comMencao('ninguem', 'parceria', PARCERIA, 2);
+    const caixa = porTipo(card.components, 17)[0];
+
+    assert.deepEqual(caixa.components.map((item) => item.type), [12, 1, 10]);
+    assert.equal(caixa.components.at(-1).id, 7);
+  });
+
+  test('parceria: o cupom é relido do bloco, também no formato antigo', async () => {
+    const { mensagem } = await previaPronta('parceria', PARCERIA);
+    const resposta = await responder(clique('editar-texto', 'parceria', mensagem));
+    assert.equal(valorDoCampo(resposta, 'cupom'), 'TECHGIRLS20');
+
+    // Pré-visualização aberta antes da troca, com a linha do bilhete acima do bloco.
+    const antigo = JSON.parse(JSON.stringify(mensagem));
+    porIdDoComponente(antigo.components, 11).content = '🎟️ **Use o código**\n```\nTECHGIRLS20\n```';
+    const deAntes = await responder(clique('editar-texto', 'parceria', antigo));
+    assert.equal(valorDoCampo(deAntes, 'cupom'), 'TECHGIRLS20');
   });
 
   test('aviso sem data fica com o container só da autora', async () => {
@@ -378,7 +408,7 @@ describe('pré-visualização em V2', () => {
     assert.equal(botoes(resposta.data.components).some((item) => item.style === 5), false, 'sem link, sem botão');
   });
 
-  test('traz os dois menus e os quatro botões, com Publicar travado', async () => {
+  test('traz os dois menus e os cinco botões, com Publicar travado', async () => {
     const { resposta } = await previaPronta();
 
     assert.deepEqual(
@@ -391,8 +421,12 @@ describe('pré-visualização em V2', () => {
     );
     assert.deepEqual(
       botoes(resposta.data.components).filter((item) => item.custom_id).map((item) => item.label),
-      ['Editar texto', 'Editar imagens', 'Publicar', 'Cancelar'],
+      ['Editar texto', 'Trocar imagens', 'Publicar', 'Limpar', 'Cancelar'],
     );
+    // Uma action row aceita no máximo 5 botões.
+    const linhaDosBotoes = achar(resposta.data.components, (item) => item.type === 1
+      && item.components?.some((filho) => filho.label === 'Publicar'))[0];
+    assert.equal(linhaDosBotoes.components.length, 5);
     assert.equal(botoes(resposta.data.components).find((item) => item.label === 'Publicar').disabled, true);
   });
 
@@ -737,6 +771,156 @@ describe('publicar', () => {
     const resposta = await responder(clique('publicar', 'evento', mensagem));
     assert.match(resposta.data.content, /Escolha no menu/);
     assert.equal(api.chamadas.length, 0);
+  });
+});
+
+describe('limpar', () => {
+  const botao = (componentes, rotulo) => botoes(componentes).find((item) => item.label === rotulo);
+
+  // Pré-visualização com texto, 3 imagens, menção e reação escolhidas, já perguntando
+  // se é para limpar. `card` é como ela estava antes do Limpar.
+  async function perguntando(escolha = 'suporte', modelo = 'parceria', campos = PARCERIA) {
+    espionarApi();
+    const comMencaoEImagens = await comMencao(escolha, modelo, campos, 3);
+    const comReacao = await cliqueEEdicao('reacao', modelo, comMencaoEImagens, ['festa']);
+    const card = { components: comReacao.componentes, attachments: [] };
+    const pergunta = await cliqueEEdicao('limpar', modelo, card);
+    return { card, ...pergunta };
+  }
+
+  // A mesma pré-visualização, já limpa pelo Confirmar.
+  async function limpo(escolha, modelo = 'parceria', campos) {
+    const { componentes } = await perguntando(escolha, modelo, campos);
+    return cliqueEEdicao('limpar-confirmar', modelo, { components: componentes, attachments: [] });
+  }
+
+  describe('confirmação', () => {
+    test('Limpar só pergunta: mostra a pergunta com Confirmar e Voltar', async () => {
+      const { resposta, componentes } = await perguntando();
+
+      assert.equal(resposta.type, 6);
+      assert.equal(textos(componentes)[0], 'Limpar todos os campos e as imagens? Menção e reação continuam.');
+      assert.deepEqual(
+        botoes(componentes).filter((item) => item.custom_id).map((item) => [item.label, item.custom_id]),
+        [['Confirmar', 'anuncio:limpar-confirmar:parceria'], ['Voltar', 'anuncio:limpar-voltar:parceria']],
+      );
+    });
+
+    test('enquanto pergunta, nada é apagado: texto e imagens continuam', async () => {
+      const { card, componentes, corpo } = await perguntando();
+
+      for (const id of [1, 2, 3, 10, 11]) {
+        assert.deepEqual(porIdDoComponente(componentes, id), porIdDoComponente(card.components, id), `id ${id} igual`);
+      }
+      assert.deepEqual(porIdDoComponente(componentes, 5), porIdDoComponente(card.components, 5), 'a galeria com os mesmos endereços');
+      assert.equal(porTipo(componentes, 12)[0].items.length, 3);
+      assert.equal(corpo.attachments, undefined, 'a pergunta não mexe nos arquivos da mensagem');
+    });
+
+    test('enquanto pergunta, os menus ficam travados sem perder a escolha', async () => {
+      const { componentes } = await perguntando();
+
+      assert.equal(menu(componentes, 'mencao', 'parceria').disabled, true);
+      assert.equal(menu(componentes, 'reacao', 'parceria').disabled, true);
+      assert.equal(menu(componentes, 'mencao', 'parceria').options.find((o) => o.default).value, 'suporte');
+      assert.equal(menu(componentes, 'reacao', 'parceria').options.find((o) => o.default).value, 'festa');
+    });
+
+    test('Voltar devolve a pré-visualização exatamente como estava, imagens incluídas', async () => {
+      const { card, componentes } = await perguntando();
+      const { resposta, componentes: devolvida, corpo } = await cliqueEEdicao('limpar-voltar', 'parceria', {
+        components: componentes,
+        attachments: [],
+      });
+
+      assert.equal(resposta.type, 6);
+      assert.deepEqual(devolvida, card.components);
+      assert.equal(corpo.attachments, undefined, 'Voltar não mexe nos arquivos da mensagem');
+    });
+  });
+
+  test('Confirmar adia, edita pelo webhook e esvazia todos os campos', async () => {
+    const { resposta, componentes } = await limpo();
+
+    assert.equal(resposta.type, 6);
+    for (const id of [2, 3, 10, 11]) assert.equal(porIdDoComponente(componentes, id), null, `id ${id} some`);
+    assert.equal(botoes(componentes).some((item) => item.style === 5), false, 'sem link, sem botão');
+    assert.match(textos(componentes)[0], /^Rascunho em branco\. Toque em Editar texto/);
+  });
+
+  test('tira as imagens da galeria e da mensagem', async () => {
+    const { componentes, corpo } = await limpo();
+
+    assert.equal(porTipo(componentes, 12).length, 0, 'sem galeria');
+    assert.deepEqual(corpo.attachments, [], 'os arquivos saem da mensagem');
+  });
+
+  test('não cancela: menção e reação continuam escolhidas', async () => {
+    const { componentes } = await limpo();
+
+    assert.equal(menu(componentes, 'mencao', 'parceria').options.find((o) => o.default).value, 'suporte');
+    assert.equal(menu(componentes, 'reacao', 'parceria').options.find((o) => o.default).value, 'festa');
+    assert.equal(porIdDoComponente(componentes, 1).content, `<@&${ID_SUPORTE}>`, 'a menção continua acima do card');
+    assert.deepEqual(porTipo(componentes, 17)[0].components.map((item) => item.id), [7], 'o container fica com a autora');
+  });
+
+  test('em branco: Publicar e Limpar travam', async () => {
+    const { componentes } = await limpo();
+
+    assert.equal(botao(componentes, 'Publicar').disabled, true);
+    assert.equal(botao(componentes, 'Limpar').disabled, true);
+    assert.equal(botao(componentes, 'Editar texto').disabled, false);
+  });
+
+  test('o aviso de @everyone continua, junto com a frase do rascunho', async () => {
+    const { componentes } = await limpo('everyone');
+    assert.equal(
+      textos(componentes)[0],
+      'Rascunho em branco. Toque em Editar texto para escrever o anúncio de novo.\n'
+        + 'Atenção: isso vai notificar todas as pessoas do servidor.',
+    );
+  });
+
+  test('Editar texto abre o formulário vazio, e o envio atualiza no lugar', async () => {
+    const { componentes } = await limpo();
+    const formulario = await responder(clique('editar-texto', 'parceria', { components: componentes }));
+    assert.equal(formulario.type, 9);
+    assert.deepEqual(formulario.data.components.map((label) => label.component.value).filter(Boolean), []);
+
+    const resposta = await responder(envioDoModal('parceria', PARCERIA, { mensagem: { components: componentes } }));
+    await esperarPendentes();
+    const atualizada = ultimaEdicao().components;
+
+    assert.equal(resposta.type, 6);
+    assert.equal(porIdDoComponente(atualizada, 2).content, `# ${PARCERIA.titulo}`);
+    assert.equal(menu(atualizada, 'mencao', 'parceria').options.find((o) => o.default).value, 'suporte');
+    assert.equal(botao(atualizada, 'Publicar').disabled, false);
+  });
+
+  test('publicar um rascunho em branco não publica nada', async () => {
+    const { componentes } = await limpo();
+    const original = console.error;
+    console.error = () => {};
+    let resposta;
+    try {
+      resposta = await responder(clique('publicar', 'parceria', { components: componentes }));
+      await esperarPendentes();
+    } finally {
+      console.error = original;
+    }
+
+    assert.match(resposta.data.content, /O rascunho está incompleto/);
+    assert.equal(ultimasChamadas.some((c) => c.url.includes('/channels/CA/messages')), false);
+  });
+
+  test('Trocar imagens abre o formulário de imagens, com a mesma ação de antes', async () => {
+    const { mensagem } = await previaPronta();
+    const trocar = botoes(mensagem.components).find((item) => item.label === 'Trocar imagens');
+
+    assert.equal(trocar.custom_id, 'anuncio:editar-imagens:evento', 'a ação não mudou, só o rótulo');
+    const resposta = await responder(clique('editar-imagens', 'evento', mensagem));
+    assert.equal(resposta.type, 9);
+    assert.match(resposta.data.custom_id, /^anuncio:imagens:evento/);
   });
 });
 

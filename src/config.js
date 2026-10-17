@@ -11,6 +11,14 @@ export const CORES = {
   ENCERRADA: cor('#4A2A8C'), // roxo-700, também usado no log
 };
 
+// Onde cada comando pode ser usado. Os valores são nomes das vars do wrangler.toml,
+// não IDs, porque ID de canal não mora neste arquivo. O /vaga encerrar não entra
+// aqui: ele tem regra própria, só funciona dentro de um post do fórum de vagas.
+export const CANAIS_PERMITIDOS = {
+  'vaga nova': ['CANAL_LOG_ID'],
+  anuncio: ['CANAL_LOG_ID'],
+};
+
 // Tags do fórum de vagas. O código mapeia sempre por ID, nunca por nome:
 // renomear a tag no servidor não pode quebrar o bot.
 export const TAGS_SENIORIDADE = [

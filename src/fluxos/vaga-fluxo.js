@@ -5,9 +5,12 @@ import { lerCamposDoModal } from '../componentes/comum.js';
 import {
   ACAO,
   MAXIMO_TITULO,
+  PERGUNTA_DE_LIMPEZA,
+  RASCUNHO_EM_BRANCO,
   SELECOES,
   cargosDaVaga,
   faltaEscolher,
+  faltaPreencher,
   funcaoDaArea,
   lerAcao,
   lerCartao,
@@ -30,7 +33,7 @@ import { ID_FRASE, adiarMensagem, atualizarPrevia, concluirV2, registrarEtapa, r
 const ID_APOIO = 8;
 
 const previa = (estado) => [
-  texto(textoDaPrevia(estado.escolhas), ID_APOIO),
+  texto(estado.confirmandoLimpeza ? PERGUNTA_DE_LIMPEZA : textoDaPrevia(estado.escolhas, estado.valores), ID_APOIO),
   ...montarCartao({ controles: true, ...estado }),
 ];
 
@@ -43,10 +46,25 @@ function criarPrevia(interacao, ctx, componentes) {
   return adiarMensagem();
 }
 
+/**
+ * Mostra a pré-visualização em resposta ao formulário.
+ * Formulário aberto por botão (Corrigir, Preencher) vem com a mensagem de origem, e
+ * aí ela é atualizada no lugar, como no /anuncio: criar outra mensagem perderia as
+ * escolhas dos menus e deixaria o rascunho antigo para trás.
+ */
+function mostrar(interacao, ctx, componentes) {
+  if (!interacao.message) return criarPrevia(interacao, ctx, componentes);
+
+  ctx.waitUntil(atualizarPrevia(interacao, componentes, {}, FLUXO));
+  return json({ type: TIPO_RESPOSTA.ATUALIZACAO_ADIADA });
+}
+
 // Envio do formulário.
 export function tratarEnvioDoModal(interacao, env, ctx) {
   const campos = lerCamposDoModal(interacao.data?.components);
   const autora = lerAutora(interacao);
+  // As escolhas dos menus sobrevivem ao formulário, inclusive depois do Limpar.
+  const escolhas = interacao.message ? lerCartao(interacao.message.components ?? []).escolhas : {};
 
   const valores = {
     titulo: campos.titulo ?? '',
@@ -58,7 +76,7 @@ export function tratarEnvioDoModal(interacao, env, ctx) {
 
   if (!valores.titulo || !valores.empresa) {
     registrarFalha(FLUXO, 'envio do formulário', 'título ou empresa em branco');
-    return criarPrevia(interacao, ctx, montarErro({
+    return mostrar(interacao, ctx, montarErro({
       valores, autora,
       frase: 'Título do cargo e empresa são obrigatórios.',
     }));
@@ -67,11 +85,11 @@ export function tratarEnvioDoModal(interacao, env, ctx) {
   const resultado = validarLink(valores.link, { obrigatorio: true });
   if (resultado.erro) {
     registrarFalha(FLUXO, 'envio do formulário', `link recusado: ${valores.link}`);
-    return criarPrevia(interacao, ctx, montarErro({ valores, autora, frase: resultado.erro }));
+    return mostrar(interacao, ctx, montarErro({ valores, autora, frase: resultado.erro }));
   }
   valores.link = resultado.link;
 
-  return criarPrevia(interacao, ctx, previa({ valores, escolhas: {}, autora }));
+  return mostrar(interacao, ctx, previa({ valores, escolhas, autora }));
 }
 
 // Menus e botões da pré-visualização.
@@ -86,8 +104,27 @@ export function tratarComponente(interacao, env, ctx) {
 
   const atual = lerCartao(componentes);
 
+  // Corrigir e Preencher abrem o mesmo formulário, com o que já houver escrito.
   if (acao === ACAO.CORRIGIR) {
-    return modal(montarModal(atual.valores));
+    return modal(montarModal(atual.valores, interacao.id));
+  }
+
+  // Limpar só pergunta: o card fica onde está, com Confirmar e Voltar no lugar dos botões.
+  if (acao === ACAO.LIMPAR) {
+    ctx.waitUntil(atualizarPrevia(interacao, previa({ ...atual, confirmandoLimpeza: true }), {}, FLUXO));
+    return json({ type: TIPO_RESPOSTA.ATUALIZACAO_ADIADA });
+  }
+
+  // Confirmar esvazia os campos e mantém as escolhas dos menus, sem encerrar o fluxo.
+  if (acao === ACAO.LIMPAR_CONFIRMAR) {
+    ctx.waitUntil(atualizarPrevia(interacao, previa({ ...atual, valores: { ...RASCUNHO_EM_BRANCO } }), {}, FLUXO));
+    return json({ type: TIPO_RESPOSTA.ATUALIZACAO_ADIADA });
+  }
+
+  // Voltar remonta a pré-visualização do jeito que estava, lida do próprio card.
+  if (acao === ACAO.LIMPAR_VOLTAR) {
+    ctx.waitUntil(atualizarPrevia(interacao, previa(atual), {}, FLUXO));
+    return json({ type: TIPO_RESPOSTA.ATUALIZACAO_ADIADA });
   }
 
   const selecao = SELECOES.find((item) => item.acao === acao);
@@ -108,6 +145,13 @@ export function tratarComponente(interacao, env, ctx) {
   }
 
   if (acao === ACAO.PUBLICAR) {
+    // O botão já vem travado, mas a conferência vale do lado de cá também.
+    const vazios = faltaPreencher(atual.valores);
+    if (vazios.length) {
+      registrarFalha(FLUXO, 'publicar', `campos vazios: ${vazios.join(', ')}`);
+      return mensagemEfemera('O rascunho está incompleto. Toque em Preencher e escreva a vaga antes de publicar.');
+    }
+
     const falta = faltaEscolher(atual.escolhas);
     if (falta.length) {
       registrarFalha(FLUXO, 'publicar', `escolhas faltando: ${falta.join(', ')}`);

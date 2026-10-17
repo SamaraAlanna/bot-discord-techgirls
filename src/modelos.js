@@ -6,12 +6,17 @@
 //   descricao  o texto corrido, também fora do container
 //   data       validada como horário de Brasília e mostrada como timestamp nativo
 //   link       validado com https e vira o botão do card
-//   texto      o resto, que aparece dentro do container
+//   texto      o resto, que aparece dentro do container, ou fora dele com `foraDoContainer`
+//
+// `maximo` é o max_length do campo, e o formulário avisa o limite na descrição.
+// Os valores cabem com folga numa mensagem V2 (seção 9.9), e um teste confere.
 
 import { CURTO, PARAGRAFO } from './componentes/comum.js';
 
 const DESCRICAO_DA_DATA = 'Formato DD/MM/AAAA HH:MM. A hora é lida como horário de Brasília.';
 const EXEMPLO_DE_DATA = '15/10/2026 19:00';
+// DD/MM/AAAA HH:MM tem exatamente 16 caracteres.
+const MAXIMO_DA_DATA = 16;
 
 export const MODELOS = {
   evento: {
@@ -24,7 +29,7 @@ export const MODELOS = {
       { id: 'titulo', papel: 'titulo', rotulo: 'Título', estilo: CURTO, obrigatorio: true, maximo: 200 },
       { id: 'oque', papel: 'descricao', rotulo: 'Descrição', estilo: PARAGRAFO, obrigatorio: true, maximo: 1500 },
       {
-        id: 'quando', papel: 'data', rotulo: 'Quando', estilo: CURTO, obrigatorio: true, maximo: 20,
+        id: 'quando', papel: 'data', rotulo: 'Quando', estilo: CURTO, obrigatorio: true, maximo: MAXIMO_DA_DATA,
         marca: '📅', nome: 'Quando', descricao: DESCRICAO_DA_DATA, exemplo: EXEMPLO_DE_DATA,
       },
       {
@@ -36,8 +41,9 @@ export const MODELOS = {
         obrigatorio: false, maximo: 500, exemplo: 'https://',
       },
     ],
-    // Ordem do conteúdo dentro do container, que também define os ids fixos:
-    // o primeiro campo é o id 10, o segundo é o 11, e a leitura segue a mesma ordem.
+    // Ordem do conteúdo no card, que também define os ids fixos: o primeiro campo é
+    // o id 10, o segundo é o 11, e a leitura segue a mesma ordem. Vale para campo
+    // dentro e fora do container.
     ordemNoCard: ['onde', 'quando'],
   },
 
@@ -52,17 +58,19 @@ export const MODELOS = {
       { id: 'texto', papel: 'descricao', rotulo: 'Descrição', estilo: PARAGRAFO, obrigatorio: true, maximo: 1500 },
       {
         id: 'cupom', papel: 'texto', rotulo: 'Código do cupom', estilo: CURTO, obrigatorio: true, maximo: 50,
-        formato: 'cupom', exemplo: 'TECHGIRLS20',
+        formato: 'cupom', exemplo: 'TECHGIRLS20', foraDoContainer: true,
       },
       {
         id: 'desconto', papel: 'texto', rotulo: 'Desconto e condições', estilo: CURTO, obrigatorio: true,
-        maximo: 200, exemplo: '20% de desconto até 30/11',
+        maximo: 200, exemplo: '20% de desconto até 30/11', foraDoContainer: true,
       },
       {
         id: 'link', papel: 'link', rotulo: 'Link (opcional)', estilo: CURTO, obrigatorio: false,
         maximo: 500, exemplo: 'https://',
       },
     ],
+    // Os dois ficam fora do container, logo abaixo da descrição: o desconto em texto
+    // normal e o código no bloco. Dentro sobram a galeria, o botão e a assinatura.
     ordemNoCard: ['desconto', 'cupom'],
   },
 
@@ -81,7 +89,7 @@ export const MODELOS = {
       },
       {
         id: 'quando', papel: 'data', rotulo: 'Quando (opcional)', estilo: CURTO, obrigatorio: false,
-        maximo: 20, marca: '📅', nome: 'Quando', descricao: DESCRICAO_DA_DATA, exemplo: EXEMPLO_DE_DATA,
+        maximo: MAXIMO_DA_DATA, marca: '📅', nome: 'Quando', descricao: DESCRICAO_DA_DATA, exemplo: EXEMPLO_DE_DATA,
       },
     ],
     ordemNoCard: ['quando'],

@@ -7,7 +7,10 @@ import {
   ACAO,
   CAMPO_IMAGENS,
   IDS,
+  PERGUNTA_DE_LIMPEZA,
   emojiDaReacao,
+  estaEmBranco,
+  faltaPreencher,
   lerAcao,
   lerCartao,
   mencaoParaPublicar,
@@ -36,7 +39,9 @@ import { validarLink } from '../validacao.js';
 
 // Pré-visualização inteira: a linha de apoio em cima e o card com os controles.
 const previa = (modelo, estado) => [
-  texto(textoDaPrevia(estado.escolha), IDS.APOIO),
+  texto(estado.confirmandoLimpeza ? PERGUNTA_DE_LIMPEZA : textoDaPrevia(estado.escolha, {
+    emBranco: estaEmBranco(modelo, estado.valores) && !(estado.imagens ?? []).length,
+  }), IDS.APOIO),
   ...montarCartao({ modelo, controles: true, ...estado }),
 ];
 
@@ -189,13 +194,37 @@ export function tratarComponente(interacao, env, ctx) {
 
   // O modal de imagens não depende do estado: responde direto, sem ler nada e sem rede.
   if (acao === ACAO.EDITAR_IMAGENS) {
-    return modal(montarModalImagens(modelo));
+    return modal(montarModalImagens(modelo, interacao.id));
   }
 
   const atual = lerCartao(modelo, componentes);
 
   if (acao === ACAO.EDITAR_TEXTO || acao === ACAO.CORRIGIR) {
-    return modal(montarModalTexto(modelo, valoresParaOModal(modelo, atual.valores)));
+    return modal(montarModalTexto(modelo, valoresParaOModal(modelo, atual.valores), interacao.id));
+  }
+
+  // Limpar e Voltar remontam o card com a galeria nos mesmos endereços, que é o que
+  // mantém as imagens na mensagem (seção 12). Limpar só troca os botões pela pergunta.
+  if (acao === ACAO.LIMPAR || acao === ACAO.LIMPAR_VOLTAR) {
+    ctx.waitUntil(atualizarPrevia(
+      interacao,
+      previa(modelo, { ...atual, imagens: imagensAtuais(interacao), confirmandoLimpeza: acao === ACAO.LIMPAR }),
+      {},
+      FLUXO,
+    ));
+    return json({ type: TIPO_RESPOSTA.ATUALIZACAO_ADIADA });
+  }
+
+  // Confirmar esvazia os campos e as imagens e mantém menção e reação, sem encerrar o
+  // fluxo. `attachments: []` tira os arquivos da mensagem junto com a galeria.
+  if (acao === ACAO.LIMPAR_CONFIRMAR) {
+    ctx.waitUntil(atualizarPrevia(
+      interacao,
+      previa(modelo, { valores: {}, autora: atual.autora, escolha: atual.escolha, reacao: atual.reacao, imagens: [] }),
+      { attachments: [] },
+      FLUXO,
+    ));
+    return json({ type: TIPO_RESPOSTA.ATUALIZACAO_ADIADA });
   }
 
   if (acao === ACAO.MENCAO || acao === ACAO.REACAO) {
@@ -208,6 +237,12 @@ export function tratarComponente(interacao, env, ctx) {
   }
 
   if (acao === ACAO.PUBLICAR) {
+    // O botão já vem travado, mas a conferência vale do lado de cá também.
+    const vazios = faltaPreencher(modelo, atual.valores);
+    if (vazios.length) {
+      registrarFalha(FLUXO, 'publicar', `campos vazios: ${vazios.join(', ')}`);
+      return mensagemEfemera('O rascunho está incompleto. Toque em Editar texto e escreva o anúncio antes de publicar.');
+    }
     if (!atual.escolha) return mensagemEfemera('Escolha no menu quem deve ser avisada antes de publicar.');
 
     ctx.waitUntil(publicar(interacao, env, modelo, atual));

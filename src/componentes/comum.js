@@ -16,13 +16,26 @@ export const PARAGRAFO = 2;
 const BOTAO_VERDE = 3;
 const BOTAO_VERMELHO = 4;
 
-// Um campo de texto do modal, embrulhado no Label (type 18).
-// O `label` do próprio campo de texto está deprecated, por isso ele vem do Label.
+// "1500" vira "1.500", como se escreve número em português.
+const comMilhar = (numero) => String(numero).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+
+// A doc limita a descrição do Label a 100 caracteres (seção 12).
+export const MAXIMO_DESCRICAO_DO_CAMPO = 100;
+
+/**
+ * Um campo de texto do modal, embrulhado no Label (type 18).
+ * O `label` do próprio campo de texto está deprecated, por isso ele vem do Label.
+ * O limite de caracteres vai sempre no fim da descrição, como "Até 100 caracteres.".
+ */
 export function campoDeTexto({ rotulo, descricao, id, estilo, obrigatorio, exemplo, maximo, valor }) {
+  const descricaoComLimite = [descricao, maximo ? `Até ${comMilhar(maximo)} caracteres.` : null]
+    .filter(Boolean)
+    .join(' ');
+
   return {
     type: LABEL,
     label: rotulo,
-    ...(descricao ? { description: descricao } : {}),
+    ...(descricaoComLimite ? { description: descricaoComLimite } : {}),
     component: {
       type: CAMPO_DE_TEXTO,
       custom_id: id,
@@ -31,7 +44,9 @@ export function campoDeTexto({ rotulo, descricao, id, estilo, obrigatorio, exemp
       ...(exemplo ? { placeholder: exemplo } : {}),
       ...(maximo ? { max_length: maximo } : {}),
       // `value` deixa o campo já preenchido, que é o que permite reabrir para editar.
-      ...(valor ? { value: valor } : {}),
+      // Ele nunca passa do máximo: um rascunho salvo com limite maior geraria um
+      // formulário que o Discord recusa sem avisar ninguém (seção 12).
+      ...(valor ? { value: maximo ? String(valor).slice(0, maximo) : valor } : {}),
     },
   };
 }
