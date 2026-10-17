@@ -4,7 +4,15 @@
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 
-import { CORES, TAGS_AREA, TAGS_MODALIDADE, TAGS_SENIORIDADE } from '../src/config.js';
+import {
+  CORES,
+  FUNCOES_POR_AREA,
+  MENCOES,
+  TAGS_AREA,
+  TAGS_MODALIDADE,
+  TAGS_SENIORIDADE,
+} from '../src/config.js';
+import { MAXIMO_ROTULO_DO_BOTAO, rotuloDoBotao } from '../src/componentes/vaga-componentes.js';
 import { rotear } from '../src/index.js';
 
 const FLAGS_PREVIA = 64 | 32768;
@@ -30,7 +38,16 @@ let ultimasChamadas = [];
 const edicoesDaPrevia = () => ultimasChamadas.filter((item) => item.url.includes('/webhooks/'));
 const ultimaPrevia = () => edicoesDaPrevia().at(-1)?.corpo ?? null;
 
-function espionarApi({ falharEm } = {}) {
+// Todos os cargos do config.js, que é como o servidor está hoje.
+const TODOS_OS_CARGOS = [
+  ...TAGS_AREA.map((area) => area.cargoId),
+  ...Object.values(FUNCOES_POR_AREA).flat().map((funcao) => funcao.cargoId),
+].filter(Boolean);
+
+const cargoDaArea = (valor) => TAGS_AREA.find((area) => area.valor === valor).cargoId;
+const cargoDaFuncao = (area, valor) => FUNCOES_POR_AREA[area].find((funcao) => funcao.valor === valor).cargoId;
+
+function espionarApi({ falharEm, cargosNoServidor = TODOS_OS_CARGOS } = {}) {
   const chamadas = [];
   ultimasChamadas = chamadas;
   globalThis.fetch = async (url, opcoes = {}) => {
@@ -42,6 +59,9 @@ function espionarApi({ falharEm } = {}) {
     }
     if (endereco.includes('/threads')) {
       return new Response(JSON.stringify({ id: 'POST1', message: { id: 'MSG1' } }), { status: 200 });
+    }
+    if (endereco.endsWith('/guilds/G1/roles')) {
+      return new Response(JSON.stringify(cargosNoServidor.map((id) => ({ id, name: 'cargo' }))), { status: 200 });
     }
     return new Response(JSON.stringify({ id: 'MSG1' }), { status: 200 });
   };
@@ -196,7 +216,7 @@ describe('pré-visualização em V2', () => {
     assert.equal(soltos[3].content, 'Time de plataforma, stack Node e AWS.');
   });
 
-  test('o container é magenta e traz os dados, o domínio, o botão e a assinatura', async () => {
+  test('o container é magenta e traz os dados, o botão e a assinatura, sem linha de domínio', async () => {
     espionarApi();
     const { mensagem } = await previaPronta();
     const caixa = porTipo(mensagem.components, 17)[0];
@@ -210,13 +230,17 @@ describe('pré-visualização em V2', () => {
         [11, '📊 **Senioridade:** Ainda não escolhido'],
         [12, '🏠 **Modalidade:** Ainda não escolhido'],
         [13, '📍 **Local:** São Paulo, SP'],
-        [5, '🔗 Candidatar-se em **vagas.acme.com**'],
         [7, '-# Autora: <@ADMIN1>'],
       ],
     );
+    assert.equal(porIdDoComponente(mensagem.components, 5), null, 'o id 5 da antiga linha do domínio não volta');
+
+    // O botão vem depois dos dados e antes da assinatura.
+    assert.deepEqual(caixa.components.map((item) => item.type), [10, 10, 10, 10, 1, 10]);
 
     const botao = botoes(caixa.components).find((item) => item.style === 5);
-    assert.equal(botao.label, 'Candidatar-se');
+    assert.equal(botao.id, 6);
+    assert.equal(botao.label, 'Candidatar-se em vagas.acme.com');
     assert.equal(botao.url, VAGA.link, 'o link completo fica no botão');
   });
 
@@ -253,6 +277,85 @@ describe('pré-visualização em V2', () => {
     );
     assert.equal(botoes(mensagem.components).find((item) => item.label === 'Publicar').disabled, true);
     assert.equal(textos(mensagem.components)[0], 'Confira como vai ficar e escolha ainda: área, senioridade, modalidade.');
+  });
+});
+
+describe('botão Candidatar-se', () => {
+  const botaoDoCard = (componentes) => botoes(componentes).find((item) => item.style === 5);
+
+  test('o limite do rótulo é o da doc: 80 caracteres', () => {
+    assert.equal(MAXIMO_ROTULO_DO_BOTAO, 80);
+  });
+
+  test('o domínio vem do new URL(), e o link vai exatamente como foi digitado', async () => {
+    espionarApi();
+    const digitado = 'https://Vagas.Acme.com.br/Back-End?ref=TechGirls&utm=1#topo';
+    const { mensagem } = await previaPronta({ ...VAGA, link: digitado });
+    const botao = botaoDoCard(mensagem.components);
+
+    assert.equal(botao.label, `Candidatar-se em ${new URL(digitado).hostname}`);
+    assert.equal(botao.label, 'Candidatar-se em vagas.acme.com.br');
+    assert.equal(botao.url, digitado, 'nem caixa, nem caminho, nem parâmetros mudam');
+  });
+
+  test('domínio que cabe no limite não é cortado', () => {
+    const dominio = `${'a'.repeat(MAXIMO_ROTULO_DO_BOTAO - 'Candidatar-se em '.length - 4)}.com`;
+    const rotulo = rotuloDoBotao(dominio);
+
+    assert.equal(rotulo.length, MAXIMO_ROTULO_DO_BOTAO);
+    assert.equal(rotulo, `Candidatar-se em ${dominio}`);
+  });
+
+  test('domínio longo é cortado no fim, e o resto do texto fica inteiro', () => {
+    const dominio = `${'a'.repeat(50)}.${'b'.repeat(50)}.com.br`;
+    const rotulo = rotuloDoBotao(dominio);
+
+    assert.equal(rotulo.length, MAXIMO_ROTULO_DO_BOTAO);
+    assert.ok(rotulo.startsWith('Candidatar-se em aaaa'), 'o começo nunca é cortado');
+    assert.ok(rotulo.endsWith('…'), 'as reticências mostram que o domínio foi encurtado');
+    assert.ok(dominio.startsWith(rotulo.slice('Candidatar-se em '.length, -1)), 'o que sobra é o começo do domínio');
+  });
+
+  test('no card, o domínio longo também respeita o limite e o link continua inteiro', async () => {
+    espionarApi();
+    const link = `https://${'a'.repeat(50)}.${'b'.repeat(50)}.com.br/vaga`;
+    const { mensagem } = await previaPronta({ ...VAGA, link });
+    const botao = botaoDoCard(mensagem.components);
+
+    assert.equal(botao.label.length, MAXIMO_ROTULO_DO_BOTAO);
+    assert.equal(botao.url, link);
+  });
+
+  test('sem domínio, o rótulo fica só "Candidatar-se"', () => {
+    assert.equal(rotuloDoBotao(null), 'Candidatar-se');
+    assert.equal(rotuloDoBotao(''), 'Candidatar-se');
+  });
+
+  test('o link é relido do botão: sobrevive aos menus e volta no Corrigir', async () => {
+    espionarApi();
+    const card = await cartaoCompleto();
+    const botao = botaoDoCard(card.components);
+    assert.equal(botao.url, VAGA.link);
+    assert.equal(botao.label, 'Candidatar-se em vagas.acme.com');
+
+    // Corrigir sai da mesma leitura de estado, então serve de prova do que foi relido.
+    const resposta = await responder(clique('corrigir', card));
+    const link = resposta.data.components.find((label) => label.component.custom_id === 'link').component.value;
+    assert.equal(link, VAGA.link);
+  });
+
+  test('no post publicado, o botão leva o domínio no rótulo e o link completo', async () => {
+    const api = espionarApi();
+    const card = await cartaoCompleto();
+    await responder(clique('publicar', card));
+    await esperarPendentes();
+
+    const componentes = api.cartao().corpo.components;
+    const botao = botaoDoCard(componentes);
+    assert.equal(botao.label, 'Candidatar-se em vagas.acme.com');
+    assert.equal(botao.url, VAGA.link);
+    assert.equal(porIdDoComponente(componentes, 5), null);
+    assert.equal(textos(componentes).some((conteudo) => conteudo.includes('🔗 Candidatar-se em')), false);
   });
 });
 
@@ -323,7 +426,10 @@ describe('as três seleções', () => {
     assert.equal(resposta.type, 6, 'adia e edita, como manda a regra de V2');
     assert.equal(porIdDoComponente(componentes, 10).content, '🧭 **Área:** Dados');
     assert.equal(porIdDoComponente(componentes, 11).content, '📊 **Senioridade:** Ainda não escolhido');
-    assert.equal(textos(componentes)[0], 'Confira como vai ficar e escolha ainda: senioridade, modalidade.');
+    assert.equal(
+      textos(componentes)[0],
+      'Confira como vai ficar e escolha ainda: senioridade, modalidade.\n🔔 Vai avisar quem tem o cargo **Dados**.',
+    );
   });
 
   test('Publicar só habilita com as três escolhas', async () => {
@@ -335,7 +441,7 @@ describe('as três seleções', () => {
 
     const tres = await cliqueEEdicao('modalidade', { components: duas.componentes }, ['remoto']);
     assert.equal(botoes(tres.componentes).find((item) => item.label === 'Publicar').disabled, false);
-    assert.equal(textos(tres.componentes)[0], 'Confira como vai ficar e publique quando estiver boa.');
+    assert.match(textos(tres.componentes)[0], /^Confira como vai ficar e publique quando estiver boa\.\n/);
   });
 
   test('o texto e as outras escolhas sobrevivem a cada atualização', async () => {
@@ -380,7 +486,7 @@ describe('publicar', () => {
     assert.equal(mensagem.flags, undefined, 'a criação não leva flag');
     assert.match(mensagem.content, /💼 \*\*Pessoa Desenvolvedora Back-end\*\*/);
     assert.match(mensagem.content, /🔗 Candidatar-se: https:\/\/vagas\.acme\.com/);
-    assert.deepEqual(mensagem.allowed_mentions, { parse: [] }, 'vaga não menciona ninguém');
+    assert.deepEqual(mensagem.allowed_mentions.parse, [], 'nada de everyone, here ou users');
   });
 
   test('logo depois, a primeira mensagem vira o card em V2', async () => {
@@ -460,6 +566,309 @@ describe('publicar', () => {
 
     assert.match(resposta.data.content, /Escolha ainda senioridade, modalidade/);
     assert.equal(api.post(), undefined);
+  });
+});
+
+describe('áreas e funções no config', () => {
+  test('são as oito áreas, nesta ordem', () => {
+    assert.deepEqual(TAGS_AREA.map((area) => area.rotulo), [
+      'Desenvolvimento', 'Dados', 'Design e UX', 'QA', 'Infra e Cloud',
+      'Cybersegurança', 'Suporte Técnico', 'Produto e Gestão',
+    ]);
+  });
+
+  test('toda área tem a sua lista de funções, e só elas', () => {
+    for (const area of TAGS_AREA) {
+      assert.ok(FUNCOES_POR_AREA[area.valor]?.length, `${area.rotulo} sem funções`);
+    }
+    assert.deepEqual(Object.keys(FUNCOES_POR_AREA).sort(), TAGS_AREA.map((area) => area.valor).sort());
+  });
+
+  test('todo cargo preenchido é um ID, sem repetição, e nenhum é o Suporte da equipe', () => {
+    const suporteDaEquipe = MENCOES.find((item) => item.valor === 'suporte').id;
+    for (const id of TODOS_OS_CARGOS) {
+      assert.match(id, /^\d{17,20}$/);
+      assert.notEqual(id, suporteDaEquipe, 'o ⚙️ Suporte é da equipe, não de área');
+    }
+    assert.deepEqual(TODOS_OS_CARGOS, [...new Set(TODOS_OS_CARGOS)], 'cargo repetido');
+  });
+});
+
+describe('menu de função', () => {
+  const ESCOLHAS_COM_FUNCAO = { area: 'desenvolvimento', funcao: 'back-end', senioridade: 'pleno', modalidade: 'remoto' };
+  const valores = (componentes) => menu(componentes, 'funcao').options.map((o) => o.value);
+  const escolhida = (componentes) => menu(componentes, 'funcao').options.find((o) => o.default)?.value;
+
+  test('sem área, fica travado só com "Não especificar"', async () => {
+    espionarApi();
+    const { mensagem } = await previaPronta();
+    const funcao = menu(mensagem.components, 'funcao');
+
+    assert.equal(funcao.disabled, true);
+    assert.deepEqual(funcao.options.map((o) => o.label), ['Não especificar']);
+    assert.equal(funcao.options[0].default, true);
+  });
+
+  test('vem logo depois do menu de área', async () => {
+    espionarApi();
+    const { mensagem } = await previaPronta();
+    const ordem = achar(mensagem.components, (item) => item.type === 3).map((item) => item.custom_id);
+
+    assert.deepEqual(ordem, ['vaga:area', 'vaga:funcao', 'vaga:senioridade', 'vaga:modalidade']);
+  });
+
+  test('com área, lista só as funções dela, com "Não especificar" como padrão', async () => {
+    espionarApi();
+    const { mensagem } = await previaPronta();
+    const { componentes } = await cliqueEEdicao('area', mensagem, ['dados']);
+
+    assert.equal(menu(componentes, 'funcao').disabled, undefined, 'destravado');
+    assert.deepEqual(valores(componentes), ['nao-especificar', ...FUNCOES_POR_AREA.dados.map((f) => f.valor)]);
+    assert.equal(escolhida(componentes), 'nao-especificar');
+  });
+
+  test('escolher a função adia, edita pelo webhook e marca a escolha', async () => {
+    espionarApi();
+    const { mensagem } = await previaPronta();
+    const comArea = await cliqueEEdicao('area', mensagem, ['dados']);
+    const { resposta, componentes } = await cliqueEEdicao('funcao', { components: comArea.componentes }, ['ciencia-dados']);
+
+    assert.equal(resposta.type, 6);
+    assert.equal(escolhida(componentes), 'ciencia-dados');
+  });
+
+  test('trocar de área remonta a lista e volta para "Não especificar"', async () => {
+    espionarApi();
+    const card = await cartaoCompleto(VAGA, ESCOLHAS_COM_FUNCAO);
+    assert.equal(escolhida(card.components), 'back-end');
+
+    const { componentes } = await cliqueEEdicao('area', card, ['qa']);
+    assert.deepEqual(valores(componentes), ['nao-especificar', 'qa-manual', 'qa-automacao']);
+    assert.equal(escolhida(componentes), 'nao-especificar');
+  });
+
+  test('escolher de novo a mesma área mantém a função', async () => {
+    espionarApi();
+    const card = await cartaoCompleto(VAGA, ESCOLHAS_COM_FUNCAO);
+    const { componentes } = await cliqueEEdicao('area', card, ['desenvolvimento']);
+
+    assert.equal(escolhida(componentes), 'back-end');
+  });
+
+  test('as outras escolhas não mexem na função', async () => {
+    espionarApi();
+    const card = await cartaoCompleto(VAGA, ESCOLHAS_COM_FUNCAO);
+    const { componentes } = await cliqueEEdicao('senioridade', card, ['senior']);
+
+    assert.equal(escolhida(componentes), 'back-end');
+  });
+
+  test('função de outra área é ignorada', async () => {
+    espionarApi();
+    const { mensagem } = await previaPronta();
+    const comArea = await cliqueEEdicao('area', mensagem, ['qa']);
+    const { componentes } = await cliqueEEdicao('funcao', { components: comArea.componentes }, ['front-end']);
+
+    assert.equal(escolhida(componentes), 'nao-especificar');
+  });
+
+  test('a função é opcional: Publicar habilita sem ela', async () => {
+    espionarApi();
+    const card = await cartaoCompleto();
+
+    assert.equal(escolhida(card.components), 'nao-especificar');
+    assert.equal(botoes(card.components).find((item) => item.label === 'Publicar').disabled, false);
+  });
+});
+
+describe('menção no post', () => {
+  const ESCOLHAS_COM_FUNCAO = { area: 'desenvolvimento', funcao: 'back-end', senioridade: 'pleno', modalidade: 'remoto' };
+  const DEV = cargoDaArea('desenvolvimento');
+  const BACK = cargoDaFuncao('desenvolvimento', 'back-end');
+
+  async function publicarCom(escolhas, opcoes) {
+    const api = espionarApi(opcoes);
+    const card = await cartaoCompleto(VAGA, escolhas);
+    await responder(clique('publicar', card));
+    await esperarPendentes();
+    return api;
+  }
+
+  // Roda calando o console.error, e devolve o que foi registrado nele.
+  async function comConsole(funcao) {
+    const registrado = [];
+    const original = console.error;
+    console.error = (...args) => registrado.push(args.map(String).join(' '));
+    try {
+      return { resultado: await funcao(), registrado: registrado.join(' ') };
+    } finally {
+      console.error = original;
+    }
+  }
+
+  test('a pré-visualização mostra quem vai ser avisada', async () => {
+    espionarApi();
+    const card = await cartaoCompleto(VAGA, ESCOLHAS_COM_FUNCAO);
+
+    assert.match(textos(card.components)[0], /🔔 Vai avisar quem tem os cargos \*\*Desenvolvimento\*\* e \*\*Back-End\*\*\./);
+    assert.equal(porIdDoComponente(card.components, 14).content, `<@&${DEV}> <@&${BACK}>`);
+  });
+
+  test('na pré-visualização, a menção não notifica ninguém', async () => {
+    espionarApi();
+    await cartaoCompleto(VAGA, ESCOLHAS_COM_FUNCAO);
+
+    assert.deepEqual(ultimaPrevia().allowed_mentions, { parse: [] });
+  });
+
+  test('sem área, a pré-visualização não fala de aviso', async () => {
+    espionarApi();
+    const { mensagem } = await previaPronta();
+
+    assert.doesNotMatch(textos(mensagem.components)[0], /🔔/);
+    assert.equal(porIdDoComponente(mensagem.components, 14), null);
+  });
+
+  test('a criação do post menciona área e função, e libera só esses cargos', async () => {
+    const api = await publicarCom(ESCOLHAS_COM_FUNCAO);
+    const mensagem = api.post().corpo.message;
+
+    assert.ok(mensagem.content.startsWith(`<@&${DEV}> <@&${BACK}>\n`), 'a menção abre o texto, que é o que notifica');
+    assert.deepEqual(mensagem.allowed_mentions, { parse: [], roles: [DEV, BACK] });
+  });
+
+  test('no payload da criação, content e allowed_mentions ficam dentro de message, não na raiz', async () => {
+    const api = await publicarCom(ESCOLHAS_COM_FUNCAO);
+    const corpo = api.post().corpo;
+
+    // A raiz do Start Thread in Forum tem name, applied_tags e message (seção 12).
+    assert.deepEqual(Object.keys(corpo).sort(), ['applied_tags', 'message', 'name']);
+    assert.equal(corpo.content, undefined, 'content na raiz seria ignorado');
+    assert.equal(corpo.allowed_mentions, undefined, 'allowed_mentions na raiz seria ignorado');
+
+    const { content, allowed_mentions: mencoes } = corpo.message;
+    assert.deepEqual(content.match(/<@&\d+>/g), [`<@&${DEV}>`, `<@&${BACK}>`], 'as menções no formato <@&id>');
+    assert.deepEqual(mencoes, { parse: [], roles: [DEV, BACK] }, 'libera só os cargos escolhidos');
+  });
+
+  test('a edição para o card preserva a menção da criação, acima do container', async () => {
+    const api = await publicarCom(ESCOLHAS_COM_FUNCAO);
+    const mencaoDaCriacao = api.post().corpo.message.content.split('\n')[0];
+    const componentes = api.cartao().corpo.components;
+
+    const posicao = (id) => componentes.findIndex((item) => item.id === id);
+    assert.equal(porIdDoComponente(componentes, 14).content, mencaoDaCriacao, 'a mesma menção da criação');
+    assert.equal(posicao(14), 0, 'a menção abre o card');
+    assert.ok(posicao(14) < posicao(1), 'antes do título');
+    assert.ok(posicao(14) < posicao(4), 'antes do container');
+    assert.equal(achar(porIdDoComponente(componentes, 4).components, (item) => item.id === 14).length, 0, 'fora do container');
+  });
+
+  test('o console mostra os cargos enviados e o que o Discord registrou', async () => {
+    const registrado = [];
+    const original = console.log;
+    console.log = (...args) => registrado.push(args.map(String).join(' '));
+    try {
+      await publicarCom(ESCOLHAS_COM_FUNCAO);
+    } finally {
+      console.log = original;
+    }
+
+    const linhas = registrado.join('\n');
+    assert.ok(linhas.includes(`[vaga] menção enviada na criação: ok roles: [${DEV}, ${BACK}]`));
+    assert.match(linhas, /\[vaga\] menção registrada pelo Discord: ok mention_roles: \[/);
+  });
+
+  test('sem função, menciona só a área', async () => {
+    const api = await publicarCom(ESCOLHAS);
+    const mensagem = api.post().corpo.message;
+
+    assert.ok(mensagem.content.startsWith(`<@&${DEV}>\n`));
+    assert.deepEqual(mensagem.allowed_mentions, { parse: [], roles: [DEV] });
+  });
+
+  test('nunca libera everyone, here ou users', async () => {
+    const api = await publicarCom(ESCOLHAS_COM_FUNCAO);
+    const { allowed_mentions: mencoes } = api.post().corpo.message;
+
+    assert.deepEqual(mencoes.parse, []);
+    assert.equal(mencoes.users, undefined);
+  });
+
+  test('senioridade e modalidade não mencionam', async () => {
+    const api = await publicarCom(ESCOLHAS_COM_FUNCAO);
+
+    assert.equal(api.post().corpo.message.content.match(/<@&\d+>/g).length, 2);
+  });
+
+  test('no card, a menção fica num Text Display acima do container', async () => {
+    const api = await publicarCom(ESCOLHAS_COM_FUNCAO);
+    const componentes = api.cartao().corpo.components;
+
+    assert.deepEqual(componentes[0], { type: 10, id: 14, content: `<@&${DEV}> <@&${BACK}>` });
+    assert.ok(componentes.findIndex((item) => item.type === 17) > 0, 'o container vem depois');
+  });
+
+  test('a edição para o card não avisa de novo', async () => {
+    const api = await publicarCom(ESCOLHAS_COM_FUNCAO);
+
+    assert.deepEqual(api.cartao().corpo.allowed_mentions, { parse: [] });
+  });
+
+  test('cargo que não existe mais no servidor fica de fora, e vai para o console', async () => {
+    const { resultado: api, registrado } = await comConsole(() => publicarCom(ESCOLHAS_COM_FUNCAO, {
+      cargosNoServidor: TODOS_OS_CARGOS.filter((id) => id !== BACK),
+    }));
+    const mensagem = api.post().corpo.message;
+
+    assert.deepEqual(mensagem.allowed_mentions.roles, [DEV]);
+    assert.equal(mensagem.content.includes(BACK), false);
+    assert.equal(porIdDoComponente(api.cartao().corpo.components, 14).content, `<@&${DEV}>`);
+    assert.match(registrado, /\[vaga\] falhou em menção: cargo não existe no servidor: Back-End/);
+  });
+
+  test('sem nenhum cargo que exista, publica sem menção', async () => {
+    const { resultado: api } = await comConsole(() => publicarCom(ESCOLHAS, { cargosNoServidor: [] }));
+    const mensagem = api.post().corpo.message;
+
+    assert.deepEqual(mensagem.allowed_mentions, { parse: [], roles: [] });
+    assert.doesNotMatch(mensagem.content, /<@&/);
+    assert.equal(porIdDoComponente(api.cartao().corpo.components, 14), null, 'sem Text Display vazio');
+    assert.match(api.fechamento().corpo.components[0].content, /Vaga publicada: /);
+  });
+
+  test('área sem cargo no config: avisa na pré-visualização e menciona só a função', async () => {
+    // O cenário é montado aqui, sem depender de o config real ter alguma área sem
+    // cargo: a área perde o cargoId só durante o teste e recebe de volta no fim.
+    const area = TAGS_AREA.find((item) => item.valor === 'design-ux');
+    const funcao = FUNCOES_POR_AREA[area.valor][0];
+    const cargoOriginal = area.cargoId;
+    const escolhas = { area: area.valor, funcao: funcao.valor, senioridade: 'pleno', modalidade: 'remoto' };
+
+    area.cargoId = null;
+    try {
+      espionarApi();
+      const card = await cartaoCompleto(VAGA, escolhas);
+      assert.equal(
+        textos(card.components)[0],
+        'Confira como vai ficar e publique quando estiver boa.\n'
+          + `🔔 Vai avisar quem tem o cargo **${funcao.rotulo}**. O cargo ${area.rotulo} não existe no servidor.`,
+      );
+      assert.equal(porIdDoComponente(card.components, 14).content, `<@&${funcao.cargoId}>`, 'só a função na menção');
+
+      const { resultado: api, registrado } = await comConsole(() => publicarCom(escolhas));
+      assert.deepEqual(api.post().corpo.message.allowed_mentions.roles, [funcao.cargoId]);
+      assert.ok(registrado.includes(`sem cargo no config.js: ${area.rotulo}`));
+    } finally {
+      area.cargoId = cargoOriginal;
+    }
+  });
+
+  test('se a conferência dos cargos falhar, publica com os do config e registra', async () => {
+    const { resultado: api, registrado } = await comConsole(() => publicarCom(ESCOLHAS_COM_FUNCAO, { falharEm: '/roles' }));
+
+    assert.deepEqual(api.post().corpo.message.allowed_mentions.roles, [DEV, BACK]);
+    assert.match(registrado, /\[vaga\] falhou em conferência dos cargos/);
   });
 });
 
@@ -700,6 +1109,14 @@ describe('encerrar', () => {
       assert.equal(api.cartao().corpo.flags, 32768);
     });
 
+    test('a edição não libera menção nenhuma, para encerrar não avisar de novo', async () => {
+      const api = espionarPost();
+      await responder(comandoEncerrar());
+      await esperarPendentes();
+
+      assert.deepEqual(api.cartao().corpo.allowed_mentions, { parse: [] });
+    });
+
     test('preserva todos os componentes, mudando só a cor', async () => {
       const api = espionarPost();
       await responder(comandoEncerrar());
@@ -819,6 +1236,8 @@ describe('trabalho adiado', () => {
       await registrar(`menu ${chave}`, clique(chave, mensagem, [valor]));
       mensagem = { components: ultimaPrevia().components };
     }
+    await registrar('menu funcao', clique('funcao', mensagem, ['back-end']));
+    mensagem = { components: ultimaPrevia().components };
 
     await registrar('publicar', clique('publicar', mensagem));
     await registrar('cancelar', clique('cancelar', mensagem));
@@ -829,6 +1248,7 @@ describe('trabalho adiado', () => {
       'menu area',
       'menu senioridade',
       'menu modalidade',
+      'menu funcao',
       'publicar',
       'cancelar',
     ]);
@@ -929,6 +1349,8 @@ describe('regras de Components V2', () => {
       await guardar(`menu ${chave}`, clique(chave, mensagem, [valor]));
       mensagem = { components: ultimaPrevia().components };
     }
+    await guardar('menu funcao', clique('funcao', mensagem, ['back-end']));
+    mensagem = { components: ultimaPrevia().components };
 
     await guardar('publicar', clique('publicar', mensagem));
     await guardar('cancelar', clique('cancelar', mensagem));

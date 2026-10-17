@@ -5,18 +5,32 @@
 //
 // Só faz leitura na API do Discord. Nada é alterado no servidor.
 
+import { FUNCOES_POR_AREA, TAGS_AREA } from '../src/config.js';
 import { carregarAmbiente, chamarApi, exigir } from './comum.js';
 
 // Nomes esperados, na ordem da seção 9.2 do CLAUDE.md.
 const TAGS_ESPERADAS = {
   Senioridade: ['Estágio', 'Trainee', 'Júnior', 'Pleno', 'Sênior', 'Especialista', 'Liderança'],
   Modalidade: ['Remoto', 'Híbrido', 'Presencial'],
-  Área: ['Desenvolvimento', 'Dados', 'Design e UX', 'QA', 'Infra e Cloud', 'Produto e Gestão'],
+  Área: [
+    'Desenvolvimento', 'Dados', 'Design e UX', 'QA', 'Infra e Cloud',
+    'Cybersegurança', 'Suporte Técnico', 'Produto e Gestão',
+  ],
   Status: ['Encerrada'],
 };
 
 // Cargos da seção 9.3. O emoji fica fora da comparação: só o nome importa.
-const CARGOS_ESPERADOS = ['Suporte'];
+const CARGOS_DE_ANUNCIO = ['Suporte'];
+
+// Cargos que o /vaga nova menciona: o de cada área e os das funções dela, com os
+// mesmos nomes do config.js. A comparação é exata depois de normalizar, então
+// "Suporte Técnico" nunca casa com o "⚙️ Suporte" da equipe.
+const CARGOS_DE_VAGA = TAGS_AREA.map((area) => ({
+  area: area.rotulo,
+  nomes: [area.rotulo, ...(FUNCOES_POR_AREA[area.valor] ?? []).map((funcao) => funcao.rotulo)],
+}));
+
+const CARGOS_ESPERADOS = [...CARGOS_DE_ANUNCIO, ...CARGOS_DE_VAGA.flatMap((grupo) => grupo.nomes)];
 
 // Compara nomes ignorando acento, caixa, emoji e espaço sobrando.
 function normalizar(nome) {
@@ -111,7 +125,12 @@ async function principal() {
   const guilda = await chamarApi('GET', `/guilds/${ambiente.GUILD_ID}`, { token });
   const cargos = guilda.roles ?? [];
   const { indice: indiceCargos, repetidos: cargosRepetidos } = indexar(cargos);
-  conferirGrupo('CARGOS MENCIONÁVEIS EM ANÚNCIOS', CARGOS_ESPERADOS, indiceCargos, new Set());
+  conferirGrupo('CARGOS MENCIONÁVEIS EM ANÚNCIOS', CARGOS_DE_ANUNCIO, indiceCargos, new Set());
+
+  console.log('\nCARGOS MENCIONADOS EM VAGAS (área primeiro, depois as funções)');
+  for (const grupo of CARGOS_DE_VAGA) {
+    conferirGrupo(`Área: ${grupo.area}`, grupo.nomes, indiceCargos, new Set());
+  }
 
   const ehEsperado = (cargo) => CARGOS_ESPERADOS.some((nome) => normalizar(nome) === normalizar(cargo.name));
   const ambiguos = cargosRepetidos.filter(ehEsperado);
@@ -119,11 +138,13 @@ async function principal() {
     console.log(`  ⚠ mais de um cargo com esse nome, confira qual é o certo: ${ambiguos.map((c) => `${c.name} (${c.id})`).join(', ')}`);
   }
 
-  // O bot só consegue mencionar cargo marcado como mencionável no servidor.
+  // Cargo não mencionável só notifica se o bot tiver a permissão de mencionar
+  // todos os cargos naquele canal (seção 11).
   const naoMencionaveis = cargos.filter((cargo) => ehEsperado(cargo) && !cargo.mentionable);
   if (naoMencionaveis.length) {
     console.log(`  ⚠ não estão mencionáveis: ${naoMencionaveis.map((c) => c.name).join(', ')}`);
-    console.log('    Ajuste em Configurações do servidor > Cargos > "Permitir que qualquer pessoa mencione este cargo".');
+    console.log('    Ou marque "Permitir que qualquer pessoa mencione este cargo", ou dê ao bot a permissão de');
+    console.log('    mencionar todos os cargos como exceção nos canais de avisos e de vagas.');
   } else {
     console.log('  Todos os cargos acima estão mencionáveis.');
   }

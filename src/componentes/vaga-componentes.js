@@ -1,9 +1,16 @@
 // Montagem do /vaga em Components V2: formulário, card e controles.
 //
 // Como no /anuncio, o estado mora nos próprios componentes e cada peça leva um `id`
-// numérico fixo. As três escolhas ficam marcadas como `default` nos próprios menus.
+// numérico fixo. As escolhas ficam marcadas como `default` nos próprios menus.
 
-import { CORES, TAGS_AREA, TAGS_MODALIDADE, TAGS_SENIORIDADE } from '../config.js';
+import {
+  CORES,
+  FUNCAO_NAO_ESPECIFICADA,
+  FUNCOES_POR_AREA,
+  TAGS_AREA,
+  TAGS_MODALIDADE,
+  TAGS_SENIORIDADE,
+} from '../config.js';
 import { validarLink } from '../validacao.js';
 import { CURTO, PARAGRAFO, campoDeTexto, menuDeSelecao, opcoesDaLista } from './comum.js';
 import {
@@ -27,6 +34,7 @@ export const ACAO = {
   CORRIGIR: 'corrigir',
   PUBLICAR: 'publicar',
   CANCELAR: 'cancelar',
+  FUNCAO: 'funcao',
 };
 
 export const idDaAcao = (acao) => `vaga:${acao}`;
@@ -36,20 +44,22 @@ export function lerAcao(customId) {
   return { acao };
 }
 
-// Ids fixos: fora do container o título, a empresa e a descrição; dentro os dados,
-// a linha do domínio, o botão e a assinatura.
+// Ids fixos: fora do container a menção, o título, a empresa e a descrição; dentro
+// os dados, o botão e a assinatura.
+// O 5 era a linha "Candidatar-se em domínio", que saiu do card: fica aposentado e não
+// deve ser reaproveitado, para um card antigo nunca ser lido como outra coisa.
 export const IDS = {
   TITULO: 1,
   EMPRESA: 2,
   DESCRICAO: 3,
   CONTAINER: 4,
-  DOMINIO: 5,
   BOTAO_LINK: 6,
   AUTORA: 7,
   AREA: 10,
   SENIORIDADE: 11,
   MODALIDADE: 12,
   LOCAL: 13,
+  MENCAO: 14,
 };
 
 const SEM_ESCOLHA = 'Ainda não escolhido';
@@ -113,11 +123,29 @@ export function montarModal(valores = {}) {
 
 const rotuloDaEscolha = (lista, valor) => lista.find((item) => item.valor === valor)?.rotulo ?? SEM_ESCOLHA;
 
+// A doc limita o rótulo do botão a 80 caracteres (seção 12).
+export const MAXIMO_ROTULO_DO_BOTAO = 80;
+const PREFIXO_DO_BOTAO = 'Candidatar-se em ';
+
+/**
+ * "Candidatar-se em {domínio}". Se passar do limite, quem encolhe é o domínio, com
+ * reticências no fim, e o começo do texto fica inteiro. Sem domínio, só "Candidatar-se".
+ */
+export function rotuloDoBotao(dominio) {
+  if (!dominio) return 'Candidatar-se';
+
+  const espaco = MAXIMO_ROTULO_DO_BOTAO - PREFIXO_DO_BOTAO.length;
+  const cabe = dominio.length <= espaco ? dominio : `${dominio.slice(0, espaco - 1)}…`;
+  return `${PREFIXO_DO_BOTAO}${cabe}`;
+}
+
 /**
  * Card da vaga, no formato da seção 9.5.
  * `controles` liga os menus e botões da pré-visualização.
+ * `cargos` são os mencionados acima do card. Por padrão saem das escolhas; na
+ * publicação vêm já conferidos contra os cargos que existem no servidor.
  */
-export function montarCartao({ valores, escolhas = {}, autora, controles = true }) {
+export function montarCartao({ valores, escolhas = {}, autora, controles = true, cargos = cargosDaVaga(escolhas).cargos }) {
   const dentro = SELECOES.map((selecao) => linhaDeDado(
     selecao.marca,
     selecao.rotulo,
@@ -127,29 +155,37 @@ export function montarCartao({ valores, escolhas = {}, autora, controles = true 
 
   if (valores.local) dentro.push(linhaDeDado('📍', 'Local', valores.local, IDS.LOCAL));
 
-  // O domínio em destaque ajuda a identificar golpe; o link completo fica no botão.
-  const dominio = validarLink(valores.link).dominio;
-  if (dominio) dentro.push(texto(`🔗 Candidatar-se em **${dominio}**`, IDS.DOMINIO));
-  if (valores.link) dentro.push(linha([botaoDeLink('Candidatar-se', valores.link, IDS.BOTAO_LINK)]));
+  // O domínio no rótulo ajuda a identificar golpe; o destino é o link completo,
+  // exatamente como foi digitado.
+  if (valores.link) {
+    dentro.push(linha([botaoDeLink(rotuloDoBotao(validarLink(valores.link).dominio), valores.link, IDS.BOTAO_LINK)]));
+  }
 
   dentro.push(assinatura(autora?.id, IDS.AUTORA));
 
-  const cartao = [
+  const cartao = [];
+  // A menção fica acima de tudo, fora do container, como no /anuncio.
+  if (cargos.length) cartao.push(texto(textoDaMencao(cargos), IDS.MENCAO));
+  cartao.push(
     texto(`# 💼 ${valores.titulo}`, IDS.TITULO),
     texto(`**${valores.empresa}**`, IDS.EMPRESA),
-  ];
+  );
   if (valores.descricao) cartao.push(texto(valores.descricao, IDS.DESCRICAO));
   cartao.push(container(CORES.VAGA, dentro, IDS.CONTAINER));
 
   if (!controles) return cartao;
 
+  const menus = SELECOES.map((selecao) => menuDeSelecao({
+    id: idDaAcao(selecao.acao),
+    convite: selecao.convite,
+    opcoes: opcoesDaLista(selecao.lista, escolhas[selecao.chave]),
+  }));
+  // A função depende da área, então o menu dela vem logo depois do da área.
+  menus.splice(1, 0, menuDeFuncao(escolhas));
+
   return [
     ...cartao,
-    ...SELECOES.map((selecao) => menuDeSelecao({
-      id: idDaAcao(selecao.acao),
-      convite: selecao.convite,
-      opcoes: opcoesDaLista(selecao.lista, escolhas[selecao.chave]),
-    })),
+    ...menus,
     linha([
       botao({
         id: idDaAcao(ACAO.PUBLICAR),
@@ -188,6 +224,7 @@ export function lerCartao(componentes) {
   for (const selecao of SELECOES) {
     escolhas[selecao.chave] = escolhaDoMenu(componentes, selecao.acao);
   }
+  escolhas.funcao = funcaoDaArea(escolhas.area, escolhaDoMenu(componentes, ACAO.FUNCAO));
 
   return { valores, escolhas, autora: { id: lerIdDaAutora(conteudoDe(IDS.AUTORA)) } };
 }
@@ -223,8 +260,11 @@ export function tagsDasEscolhas(escolhas = {}) {
  * post nasce com este texto e logo depois é editado para o card. Se a edição falhar,
  * isto é o que fica publicado, e continua completo.
  */
-export function textoSimples({ valores, escolhas }) {
+export function textoSimples({ valores, escolhas, cargos = cargosDaVaga(escolhas).cargos }) {
   const linhas = [
+    // É esta linha que notifica: menção acrescentada depois, na edição para o
+    // card, não avisa ninguém (seção 12).
+    ...(cargos.length ? [textoDaMencao(cargos), ''] : []),
     `💼 **${valores.titulo}**`,
     `**${valores.empresa}**`,
     '',
@@ -258,9 +298,74 @@ export function recolorir(componentes, cor) {
 }
 
 // Linha de apoio acima do card, que vai encurtando conforme as escolhas são feitas.
+// Com a área escolhida, diz também quem vai ser avisada, para a admin conferir.
 export function textoDaPrevia(escolhas = {}) {
   const falta = faltaEscolher(escolhas);
-  if (!falta.length) return 'Confira como vai ficar e publique quando estiver boa.';
+  const primeira = falta.length
+    ? `Confira como vai ficar e escolha ainda: ${falta.join(', ')}.`
+    : 'Confira como vai ficar e publique quando estiver boa.';
 
-  return `Confira como vai ficar e escolha ainda: ${falta.join(', ')}.`;
+  if (!escolhas.area) return primeira;
+  return `${primeira}
+${textoDeQuemSeraAvisada(cargosDaVaga(escolhas))}`;
 }
+
+function textoDeQuemSeraAvisada({ cargos, semCargo }) {
+  const avisadas = cargos.length
+    ? `🔔 Vai avisar quem tem ${cargos.length > 1 ? 'os cargos' : 'o cargo'} ${emLista(cargos.map((cargo) => `**${cargo.rotulo}**`))}.`
+    : '🔔 Não vai avisar ninguém.';
+  if (!semCargo.length) return avisadas;
+
+  const plural = semCargo.length > 1;
+  return `${avisadas} ${plural ? 'Os cargos' : 'O cargo'} ${emLista(semCargo)} não ${plural ? 'existem' : 'existe'} no servidor.`;
+}
+
+// "A", "A e B", "A, B e C".
+const emLista = (itens) => (itens.length > 1 ? `${itens.slice(0, -1).join(', ')} e ${itens.at(-1)}` : itens[0] ?? '');
+
+/** Funções da área, na ordem do config.js. Sem área, nenhuma. */
+export const funcoesDaArea = (area) => FUNCOES_POR_AREA[area] ?? [];
+
+/**
+ * A função só vale se for da área escolhida. Qualquer outra coisa, inclusive uma
+ * função de uma área anterior, volta para "Não especificar".
+ */
+export function funcaoDaArea(area, funcao) {
+  return funcoesDaArea(area).some((item) => item.valor === funcao) ? funcao : FUNCAO_NAO_ESPECIFICADA.valor;
+}
+
+// Só lista as funções da área escolhida. Sem área, fica travado com a opção padrão.
+function menuDeFuncao(escolhas) {
+  const funcoes = funcoesDaArea(escolhas.area);
+  return menuDeSelecao({
+    id: idDaAcao(ACAO.FUNCAO),
+    convite: funcoes.length ? 'Qual é a função? (opcional)' : 'Escolha a área primeiro.',
+    opcoes: opcoesDaLista([FUNCAO_NAO_ESPECIFICADA, ...funcoes], funcaoDaArea(escolhas.area, escolhas.funcao)),
+    desabilitado: !funcoes.length,
+  });
+}
+
+/**
+ * Cargos que a vaga menciona: o da área e, se houver, o da função. Senioridade e
+ * modalidade não mencionam. `semCargo` traz os nomes que não têm cargo no config.js.
+ */
+export function cargosDaVaga(escolhas = {}) {
+  const area = TAGS_AREA.find((item) => item.valor === escolhas.area);
+  const funcao = funcoesDaArea(escolhas.area).find((item) => item.valor === escolhas.funcao);
+
+  const cargos = [];
+  const semCargo = [];
+  for (const item of [area, funcao].filter(Boolean)) {
+    if (item.cargoId) cargos.push({ rotulo: item.rotulo, id: item.cargoId });
+    else semCargo.push(item.rotulo);
+  }
+  return { cargos, semCargo };
+}
+
+export const textoDaMencao = (cargos) => cargos.map((cargo) => `<@&${cargo.id}>`).join(' ');
+
+/**
+ * allowed_mentions da criação do post: só os cargos da vaga.
+ * `parse` vazio garante que nunca saem @everyone, @here nem a menção da autora.
+ */
+export const mencoesDaVaga = (cargos) => ({ parse: [], roles: cargos.map((cargo) => cargo.id) });

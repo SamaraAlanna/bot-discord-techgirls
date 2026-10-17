@@ -6,22 +6,25 @@ import {
   ACAO,
   MAXIMO_TITULO,
   SELECOES,
+  cargosDaVaga,
   faltaEscolher,
+  funcaoDaArea,
   lerAcao,
   lerCartao,
   montarCartao,
   montarErro,
   montarModal,
+  mencoesDaVaga,
   tagsDasEscolhas,
   textoDaPrevia,
   textoSimples,
 } from '../componentes/vaga-componentes.js';
 import { FLAG_V2, texto } from '../componentes/v2.js';
-import { criarPostNoForum, editarMensagem, linkDoPost } from '../discord-api.js';
+import { buscarCargos, criarPostNoForum, editarMensagem, linkDoPost } from '../discord-api.js';
 import { registrarNoLog } from '../log.js';
 import { TIPO_RESPOSTA, json, mensagemEfemera, modal } from '../respostas.js';
 import { validarLink } from '../validacao.js';
-import { ID_FRASE, adiarMensagem, atualizarPrevia, concluirV2, registrarFalha } from './previa-v2.js';
+import { ID_FRASE, adiarMensagem, atualizarPrevia, concluirV2, registrarEtapa, registrarFalha } from './previa-v2.js';
 
 // Pré-visualização inteira: a linha de apoio em cima e o card com os controles.
 const ID_APOIO = 8;
@@ -90,6 +93,15 @@ export function tratarComponente(interacao, env, ctx) {
   const selecao = SELECOES.find((item) => item.acao === acao);
   if (selecao) {
     const escolhas = { ...atual.escolhas, [selecao.chave]: interacao.data?.values?.[0] };
+    // Trocar de área remonta o menu de função, e a função anterior deixa de valer.
+    escolhas.funcao = funcaoDaArea(escolhas.area, atual.escolhas.funcao);
+
+    ctx.waitUntil(atualizarPrevia(interacao, previa({ ...atual, escolhas }), {}, FLUXO));
+    return json({ type: TIPO_RESPOSTA.ATUALIZACAO_ADIADA });
+  }
+
+  if (acao === ACAO.FUNCAO) {
+    const escolhas = { ...atual.escolhas, funcao: funcaoDaArea(atual.escolhas.area, interacao.data?.values?.[0]) };
 
     ctx.waitUntil(atualizarPrevia(interacao, previa({ ...atual, escolhas }), {}, FLUXO));
     return json({ type: TIPO_RESPOSTA.ATUALIZACAO_ADIADA });
@@ -118,6 +130,17 @@ export function tratarComponente(interacao, env, ctx) {
  */
 async function publicar(interacao, env, estado) {
   const adminId = interacao.member?.user?.id ?? interacao.user?.id;
+  const cargos = await cargosQueExistem(env, estado.escolhas);
+  const publicacao = { ...estado, cargos };
+
+  // content e allowed_mentions pertencem ao objeto `message`, não à raiz do corpo:
+  // é o Forum and Media Thread Message Params da doc (seção 12).
+  const mensagem = {
+    // A menção vai aqui, na criação: é a criação que notifica (seção 12).
+    content: textoSimples(publicacao),
+    allowed_mentions: mencoesDaVaga(cargos),
+  };
+  registrarEtapa(FLUXO, 'menção enviada na criação', `roles: [${mensagem.allowed_mentions.roles.join(', ')}]`);
 
   let post;
   try {
@@ -126,11 +149,7 @@ async function publicar(interacao, env, estado) {
       {
         name: estado.valores.titulo.slice(0, MAXIMO_TITULO),
         applied_tags: tagsDasEscolhas(estado.escolhas),
-        message: {
-          content: textoSimples(estado),
-          // Vaga não menciona ninguém.
-          allowed_mentions: { parse: [] },
-        },
+        message: mensagem,
       },
       env.DISCORD_TOKEN,
     );
@@ -140,8 +159,12 @@ async function publicar(interacao, env, estado) {
     return;
   }
 
+  // O resumo da chamada no console corta a resposta antes da mensagem aninhada no
+  // post. Esta linha mostra o que o Discord registrou como menção, que é o que notifica.
+  registrarEtapa(FLUXO, 'menção registrada pelo Discord', `mention_roles: [${(post.message?.mention_roles ?? []).join(', ')}]`);
+
   // A partir daqui a vaga já está no ar: nada pode desfazer isso.
-  const virouCartao = await trocarPeloCartao(env, post, estado);
+  const virouCartao = await trocarPeloCartao(env, post, publicacao);
 
   const link = linkDoPost(env.GUILD_ID, post.id);
   await registrarNoLog(env, { acao: 'Vaga publicada', adminId, detalhe: link });
@@ -164,6 +187,8 @@ async function trocarPeloCartao(env, post, estado) {
         // Ligando o V2, o conteúdo antigo precisa sair.
         content: null,
         embeds: [],
+        // A menção continua visível no card, mas quem avisou foi a criação.
+        // Liberar de novo aqui arriscaria um segundo aviso.
         allowed_mentions: { parse: [] },
       },
       env.DISCORD_TOKEN,
@@ -173,4 +198,33 @@ async function trocarPeloCartao(env, post, estado) {
     registrarFalha(FLUXO, 'troca do post pelo card V2', erro);
     return false;
   }
+}
+
+/**
+ * Cargos da área e da função que existem de fato no servidor.
+ * Cargo sem ID no config.js ou apagado do servidor fica de fora, e a vaga sai
+ * mencionando só o que existe. Se a conferência falhar, vale o config.js: é
+ * melhor avisar do que publicar calada por causa de uma leitura.
+ */
+async function cargosQueExistem(env, escolhas) {
+  const { cargos, semCargo } = cargosDaVaga(escolhas);
+  if (semCargo.length) registrarFalha(FLUXO, 'menção', `sem cargo no config.js: ${semCargo.join(', ')}`);
+  if (!cargos.length) return [];
+
+  let doServidor;
+  try {
+    doServidor = new Set((await buscarCargos(env.GUILD_ID, env.DISCORD_TOKEN)).map((cargo) => cargo.id));
+  } catch (erro) {
+    registrarFalha(FLUXO, 'conferência dos cargos, seguindo com o config.js', erro);
+    return cargos;
+  }
+
+  const apagados = cargos.filter((cargo) => !doServidor.has(cargo.id));
+  if (apagados.length) {
+    registrarFalha(FLUXO, 'menção', `cargo não existe no servidor: ${apagados.map((c) => `${c.rotulo} (${c.id})`).join(', ')}`);
+  }
+
+  const existentes = cargos.filter((cargo) => doServidor.has(cargo.id));
+  registrarEtapa(FLUXO, 'menção', existentes.map((cargo) => cargo.rotulo).join(', ') || 'ninguém');
+  return existentes;
 }

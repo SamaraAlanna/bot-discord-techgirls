@@ -113,7 +113,14 @@ async function recolorirOCartao(env, postId) {
 
     // A flag precisa ir em toda edição de mensagem V2: sem ela os componentes
     // são descartados e a mensagem fica vazia (seção 12).
-    await editarMensagem(postId, postId, { flags: FLAG_V2, components: componentes }, env.DISCORD_TOKEN);
+    // O card pode ter a menção dos cargos da vaga. allowed_mentions vazio garante
+    // que encerrar nunca avisa ninguém de novo.
+    await editarMensagem(
+      postId,
+      postId,
+      { flags: FLAG_V2, components: componentes, allowed_mentions: { parse: [] } },
+      env.DISCORD_TOKEN,
+    );
     return true;
   } catch (erro) {
     registrarFalha(FLUXO, 'cor do card', erro);

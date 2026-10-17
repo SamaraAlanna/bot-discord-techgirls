@@ -71,10 +71,17 @@ export function campoDeUpload({ rotulo, descricao, id, obrigatorio = false, mini
 }
 
 // Menu de escolha única, já dentro da action row que o Discord exige em mensagem.
-export function menuDeSelecao({ id, convite, opcoes }) {
+// `desabilitado` só vale em mensagem: a doc diz que em modal ele dá erro.
+export function menuDeSelecao({ id, convite, opcoes, desabilitado = false }) {
   return {
     type: ACTION_ROW,
-    components: [{ type: MENU_DE_TEXTO, custom_id: id, placeholder: convite, options: opcoes }],
+    components: [{
+      type: MENU_DE_TEXTO,
+      custom_id: id,
+      placeholder: convite,
+      options: opcoes,
+      ...(desabilitado ? { disabled: true } : {}),
+    }],
   };
 }
 

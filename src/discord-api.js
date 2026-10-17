@@ -76,6 +76,11 @@ export function editarMensagem(canalId, mensagemId, corpo, token) {
   return chamarDiscord('PATCH', `/channels/${canalId}/messages/${mensagemId}`, { token, corpo });
 }
 
+// Cargos do servidor. Serve para conferir, antes de mencionar, que o cargo ainda existe.
+export function buscarCargos(guildId, token) {
+  return chamarDiscord('GET', `/guilds/${guildId}/roles`, { token });
+}
+
 // Post de fórum: o Discord devolve um canal (a thread) com a primeira mensagem dentro.
 export function criarPostNoForum(canalId, corpo, token) {
   return chamarDiscord('POST', `/channels/${canalId}/threads`, { token, corpo });
