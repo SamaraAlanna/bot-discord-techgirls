@@ -10,8 +10,9 @@ export function comandoVaga(interacao, env, ctx) {
   const subcomando = interacao.data?.options?.[0]?.name;
 
   if (subcomando === 'nova') {
-    // O id da interação deixa o formulário único a cada comando. Suspeita, não
-    // documentada: o cliente devolve o que foi digitado num formulário de mesmo custom_id.
+    // O id da interação deixa o custom_id do formulário único a cada comando. Foi uma
+    // tentativa contra o formulário que volta com o que foi digitado antes: testada no
+    // servidor, não resolveu, e a causa segue desconhecida. Fica porque não atrapalha.
     return respostaForaDoCanal(interacao, env, 'vaga nova') ?? modal(montarModal({}, interacao.id));
   }
   // Encerrar e apagar têm a regra de canal deles: só dentro de um post do fórum de vagas.

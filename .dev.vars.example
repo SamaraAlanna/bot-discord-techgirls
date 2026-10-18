@@ -1,11 +1,16 @@
-# Copie para .dev.vars e preencha. O .dev.vars nunca vai para o repositorio.
+# Copie para .dev.vars e preencha. O .dev.vars nunca vai para o repositório.
 
-# Secrets (em produção: wrangler secret put NOME)
+# Secreto: com ele, qualquer pessoa age como o bot. Se vazar, troque no Developer Portal.
+# Em produção: wrangler secret put DISCORD_TOKEN
 DISCORD_TOKEN=
+
+# Não secretos: a Public Key só confere a assinatura das requisições do Discord, e o
+# Application ID é público. Em produção ficam junto do token, com o mesmo comando:
+# wrangler secret put NOME
 DISCORD_PUBLIC_KEY=
 DISCORD_APPLICATION_ID=
 
-# Vars do servidor (em produção: seção [vars] do wrangler.toml)
+# Vars do servidor, também não secretas (em produção: seção [vars] do wrangler.toml)
 GUILD_ID=
 CANAL_VAGAS_ID=
 CANAL_ANUNCIOS_ID=
